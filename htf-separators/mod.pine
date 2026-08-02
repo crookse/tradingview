@@ -37,7 +37,7 @@ if timeframe.period == "1D"
     current_timeframe := "1D"
 
 ////////////////////////////////////////////////////////////////////////////////
-// SESSIONS INPUTS
+// INPUTS
 ////////////////////////////////////////////////////////////////////////////////
 
 var input_show_daily_lines = input.string("Lines and Labels", "Show Daily Separators", options = ["Lines", "Lines and Labels", "None"], group = "Sessions")
