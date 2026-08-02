@@ -1,0 +1,130 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © crookse
+// GitHub: https://github.com/crookse
+// Website: https://supercrookstradingbros.com
+//
+// TODO
+// - Configurable daily lines
+// - Configurable hourly lines
+// - Configurable minute lines (15m)
+// - Support Weekly lines (for 4h alignment)
+
+//@version=6
+indicator("Super Crooks - HTF Separators", overlay = true, max_labels_count = 500, max_lines_count = 500)
+
+const string SCRIPT_VERSION = "v0.0.1"
+
+is_new_day = session.isfirstbar
+
+var gmt_tz = "GMT+0"
+time_current_hour = hour(time)
+time_current_minute = minute(time)
+time_is_4m_or_below = timeframe.in_seconds() <= 4 * 60
+
+var current_timeframe = "NA"
+
+if timeframe.period == "1"
+    current_timeframe := "1m"
+if timeframe.period == "5"
+    current_timeframe := "5m"
+if timeframe.period == "15"
+    current_timeframe := "15m"
+if timeframe.period == "60"
+    current_timeframe := "1h"
+if timeframe.period == "240"
+    current_timeframe := "4h"
+if timeframe.period == "1D"
+    current_timeframe := "1D"
+
+////////////////////////////////////////////////////////////////////////////////
+// SESSIONS INPUTS
+////////////////////////////////////////////////////////////////////////////////
+
+var input_show_daily_lines = input.string("Lines and Labels", "Show Daily Separators", options = ["Lines", "Lines and Labels", "None"], group = "Sessions")
+
+////////////////////////////////////////////////////////////////////////////////
+// PLOTS
+////////////////////////////////////////////////////////////////////////////////
+
+// NY is UTC-5 in standard time, UTC-4 during daylight savings; below is for Eastern Time.
+time_ny = timestamp("America/New_York", year, month, dayofmonth, 18, 0, 0)
+
+// We don't use offset because if we're in a lower timeframe and zoomed out, the
+// day label moves towards the daily line. We want the day label to stay away
+// from it no matter the timeframe/zoom.
+plotshape(dayofweek(time, "GMT-4") == 1 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       M\n       O\n       N", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 2 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       T\n       U\n       E", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 3 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       W\n       E\n       D", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 4 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       T\n       H\n       U", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 5 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       F\n       R\n       I", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 6 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       S\n       U\n       N", size = size.tiny)
+
+if is_new_day and (input_show_daily_lines == "Lines" or input_show_daily_lines == "Lines and Labels") and current_timeframe != "1D"
+    // If we're in minutes, then use thicker DAILY session lines
+    line.new(
+        x1=bar_index,
+        y1=low,
+        x2=bar_index,
+        y2=high,
+        extend = extend.both, 
+        color = color.new(color.black, 75),
+        width = 2,
+        style = line.style_solid
+    )
+
+// If time is 5m and time is at the 1 hour mark
+if (current_timeframe == "5m") and (minute(time) == 0)
+    line.new(
+      x1=bar_index[0],
+      y1=low[0],
+      x2=bar_index[0],
+      y2=high[0],
+      extend = extend.both, 
+      color = color.new(color.black, 50),
+      width = 1,
+      style = line.style_dotted
+      )
+
+// If time is at 15m, then we need to mark every 4th hour
+if current_timeframe == "15m"
+    hour_time = hour(time, gmt_tz)
+    if (hour_time == 2 or hour_time == 6 or hour_time == 10 or hour_time == 14 or hour_time == 18 or hour_time == 22) and minute == 0
+        line.new(
+            x1=bar_index[0],
+            y1=low[0],
+            x2=bar_index[0],
+            y2=high[0],
+            extend = extend.both, 
+            color = color.new(color.black, 50),
+            width = 1,
+            style = line.style_dotted
+        )
+
+if current_timeframe == "1m"
+    // Mark every 4th hour with a thick line
+    hour_time = hour(time, gmt_tz)
+    if (hour_time == 2 or hour_time == 6 or hour_time == 10 or hour_time == 14 or hour_time == 18 or hour_time == 22) and minute == 0
+        line.new(
+            x1=bar_index[0],
+            y1=low[0],
+            x2=bar_index[0],
+            y2=high[0],
+            extend = extend.both, 
+            color = color.new(color.black, 75),
+            width = 2,
+            style = line.style_solid
+        )
+
+    // Mark ever 15m with a lighter line
+    is_15_minute_mark = minute(time) % 15 == 0
+    if is_15_minute_mark
+        line.new(
+            x1=bar_index[0],
+            y1=low[0],
+            x2=bar_index[0],
+            y2=high[0],
+            extend = extend.both, 
+            color = color.new(color.black, 50),
+            width = 1,
+            style = line.style_dotted
+        )
