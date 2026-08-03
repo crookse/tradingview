@@ -1,0 +1,444 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © crookse
+// GitHub: https://github.com/crookse
+// Website: https://supercrookstradingbros.com
+
+//@version=6
+indicator("Super Crooks - Breakers", overlay = true, max_labels_count = 500, max_lines_count = 500)
+
+const string SCRIPT_VERSION = "v0.0.1"
+const int BREAKER_BOX_LENGTH = 15
+
+inputIsBullish(val) =>
+    (val != "None") and (val == "Bullish" or val == "Both")
+
+inputIsBearish(val) =>
+    (val != "None") and (val == "Bearish" or val == "Both")
+
+valToString(val) =>
+    str.tostring(val)
+
+hasValue(val) =>
+    not na(val)
+
+isUpClose(index) =>
+    if bar_index - index >= 0
+        open[bar_index - index] < close[bar_index - index]
+    else
+        false
+
+getPriceOpen(index) =>
+    if bar_index - index >= 0
+        open[bar_index - index]
+
+getPriceClose(index) =>
+    if bar_index - index >= 0
+        close[bar_index - index]
+
+getNextDownCloseCandle(int original_index, int new_index, int increment) =>
+    if isUpClose(new_index) and (bar_index - (original_index + increment) <= bar_index)
+        original_index + increment
+    else
+        new_index
+
+getNextUpCloseCandle(int original_index, int new_index, int increment) =>
+    if not isUpClose(new_index) and (bar_index - (original_index + increment) <= bar_index)
+        original_index + increment
+    else
+        new_index
+
+////////////////////////////////////////////////////////////////////////////////
+// GLOBAL INPUTS
+////////////////////////////////////////////////////////////////////////////////
+var input_global_show_setups = input.string("Both", "Show Setups", options = ["Both", "Bullish", "Bearish", "None"], group = "Global Settings")
+var input_breaker_history = input.int(10, "Breaker History", minval = 1, group = "Global Settings")
+
+////////////////////////////////////////////////////////////////////////////////
+// BREAKERS INPUTS
+////////////////////////////////////////////////////////////////////////////////
+
+var input_bullish_breaker_swing_length = input.int(3, "Swing Length (Bullish)", minval = 1, group = "Bullish Setups")
+var input_bullish_breaker_swing_confirmation = input.string("Candle Close", "Breaker Confirmation Type", options = ["Candle Close", "Candle Wick"], tooltip = "Candle Close: Bullish breaker formations will be confirmed on candle body closures (e.g., LL candle closure is lower than L candle closure).\n\nCandle Wick: Bullish breaker formations will be confirmed on candle wicks (e.g., LL candle wick is lower than L candle wick).", group = "Bullish Setups")
+var input_brkr_bullish_color = input.color(color.new(color.black, 90), "Box Color", group = "Bullish Setups")
+
+var input_bearish_breaker_swing_length = input.int(1, "Swing Length (Bearish)", minval = 1, group = "Bearish Setups")
+var input_bearish_breaker_swing_confirmation = input.string("Candle Close", "Breaker Confirmation Type", options = ["Candle Close", "Candle Wick"], tooltip = "Candle Close: Bearish breaker formations will be confirmed on candle body closures (e.g., HH candle closure is higher than H candle closure).\n\nCandle Wick: Bearish breaker formations will be confirmed on candle wicks (e.g., HH candle wick is higher than H candle wick).", group = "Bearish Setups")
+var input_brkr_bearish_color = input.color(color.new(color.black, 90), "Box Color", group = "Bearish Setups")
+
+////////////////////////////////////////////////////////////////////////////////
+// BULLISH BREAKERS
+////////////////////////////////////////////////////////////////////////////////
+
+var label[] bullish_breaker_labels = array.new<label>()
+var line[] bullish_breaker_labels_cisd_lines = array.new<line>()
+var label[] bullish_breaker_labels_cisd_line_labels = array.new<label>()
+var box[] bullish_breaker_boxes = array.new_box()
+var line[] bullish_breaker_cisd_lines = array.new<line>()
+var float[] bullish_breaker_swing_prices = array.new_float()
+var int[] bullish_breaker_indexes = array.new_int()
+var string[] bullish_breaker_swing_types = array.new_string()
+var bullish_breaker_cisd_map = map.new<string, string>()
+
+// Determine swing points for bullish breakers
+bullish_breaker_swing_low = ta.pivotlow(low, input_bullish_breaker_swing_length, input_bullish_breaker_swing_length)
+bullish_breaker_swing_low_1_length = ta.pivotlow(low, 1, 1)
+bullish_breaker_swing_high = ta.pivothigh(high, input_bullish_breaker_swing_length, input_bullish_breaker_swing_length)
+
+// Remove history bullish
+if (array.size(bullish_breaker_labels) / 4) > input_breaker_history
+    label.delete(array.shift(bullish_breaker_labels))
+    label.delete(array.shift(bullish_breaker_labels))
+    label.delete(array.shift(bullish_breaker_labels))
+    label.delete(array.shift(bullish_breaker_labels))
+
+    if array.size(bullish_breaker_labels_cisd_lines) > 0 
+        line.delete(array.shift(bullish_breaker_labels_cisd_lines))
+
+    if array.size(bullish_breaker_boxes) > 0 
+        box.delete(array.shift(bullish_breaker_boxes))
+
+if hasValue(bullish_breaker_swing_low)
+    array.unshift(bullish_breaker_swing_prices, low[input_bullish_breaker_swing_length])
+    array.unshift(bullish_breaker_indexes, bar_index - input_bullish_breaker_swing_length)
+    array.unshift(bullish_breaker_swing_types, "Low")
+
+if hasValue(bullish_breaker_swing_high)
+    array.unshift(bullish_breaker_swing_prices, high[input_bullish_breaker_swing_length])
+    array.unshift(bullish_breaker_indexes, bar_index - input_bullish_breaker_swing_length)
+    array.unshift(bullish_breaker_swing_types, "High")
+
+// Memory management -- keep the arrays clean
+if array.size(bullish_breaker_swing_prices) > 40
+    array.pop(bullish_breaker_swing_prices)
+    array.pop(bullish_breaker_indexes)
+    array.pop(bullish_breaker_swing_types)
+
+var bullish_breaker_swing_length_neutralized = (input_bullish_breaker_swing_length - 1) >= 0 ? (input_bullish_breaker_swing_length - 1) : 0
+
+// If we have 4 swing points, then we can check if the swing points
+// formed a Breakers formation
+if array.size(bullish_breaker_swing_prices) >= 3 and (bar_index - bullish_breaker_swing_length_neutralized >= 0) and barstate.isconfirmed
+    bullish_t1 = array.get(bullish_breaker_swing_types, 2)
+    bullish_t2 = array.get(bullish_breaker_swing_types, 1)
+    bullish_t3 = array.get(bullish_breaker_swing_types, 0)
+    bullish_i1 = array.get(bullish_breaker_indexes, 2)
+    bullish_i2 = array.get(bullish_breaker_indexes, 1)
+    bullish_i3 = array.get(bullish_breaker_indexes, 0)
+    bullish_i4 = bar_index - bullish_breaker_swing_length_neutralized // Should equal (bar_index - 1)
+    bullish_v1 = close[bar_index - bullish_i1]
+    bullish_v2 = close[bar_index - bullish_i2]
+    bullish_v3 = close[bar_index - bullish_i3]
+    bullish_v4 = close[bar_index - bullish_i4]
+
+    if input_bullish_breaker_swing_confirmation == "Candle Wick"
+        bullish_v1 := low[bar_index - bullish_i1]
+        bullish_v2 := high[bar_index - bullish_i2]
+        bullish_v3 := low[bar_index - bullish_i3]
+        bullish_v4 := high[bar_index - bullish_i4]
+
+    // We need the lowest price of the L to compare the LL against.
+    // If the L is an up-close (bullish) candle, then we need the opening price. This is the lowest price.
+    // If the L is a down-close (bearish) candle, then we need the closing price. This is the lowest price.
+    if isUpClose(bullish_i1) and input_bullish_breaker_swing_confirmation == "Candle Close"
+        bullish_v1 := open[bar_index - bullish_i1]
+
+    // If the H is a down-close candle, then we need the opening price for it to be the highest price.
+    if not isUpClose(bullish_i2) and input_bullish_breaker_swing_confirmation == "Candle Close"
+        bullish_v2 := open[bar_index - bullish_i2]
+
+    bullish_breaker_cisd_candle_index = bullish_i2
+    bullish_breaker_cisd_candle_index_og = bullish_breaker_cisd_candle_index
+
+    // We need a down-close candle, so go to each candle until one is found
+    bullish_breaker_cisd_candle_index := getNextDownCloseCandle(bullish_breaker_cisd_candle_index_og, bullish_breaker_cisd_candle_index, 1)
+    bullish_breaker_cisd_candle_index := getNextDownCloseCandle(bullish_breaker_cisd_candle_index_og, bullish_breaker_cisd_candle_index, 2)
+    bullish_breaker_cisd_candle_index := getNextDownCloseCandle(bullish_breaker_cisd_candle_index_og, bullish_breaker_cisd_candle_index, 3)
+    bullish_breaker_cisd_candle_index := getNextDownCloseCandle(bullish_breaker_cisd_candle_index_og, bullish_breaker_cisd_candle_index, 4)
+
+    // This opening price should be from the down-close candle we found above
+    bullish_breaker_cisd_candle_open = getPriceOpen(bullish_breaker_cisd_candle_index)
+    
+    has_low_high_low = bullish_t1 == "Low" and bullish_t2 == "High" and bullish_t3 == "Low"
+    has_all_bullish_swing_points = has_low_high_low and (bullish_v3 < bullish_v1) and (bullish_v4 > bullish_breaker_cisd_candle_open) and isUpClose(bullish_i4) and hasValue(bullish_breaker_cisd_candle_open)
+
+    if has_all_bullish_swing_points
+        array.unshift(bullish_breaker_swing_prices, bullish_v4)
+        array.unshift(bullish_breaker_indexes, bullish_i4)
+        array.unshift(bullish_breaker_swing_types, "High")
+
+    // The swing points cannot be on the same candle
+    if bullish_i1 == bullish_i2 or bullish_i2 == bullish_i3 or bullish_i3 == bullish_i4
+        has_all_bullish_swing_points := false
+
+    if inputIsBullish(input_global_show_setups) and has_all_bullish_swing_points
+
+        bullish_breaker_formation_is_valid = true
+        
+        bullish_breaker_key = "bullish_breaker:" + valToString(bullish_v1) + "_" + valToString(bullish_v2) + "_" + valToString(bullish_v3) + "_" + valToString(bullish_v4) + "_" + valToString(input_bullish_breaker_swing_length)
+
+        // Mark out bullish CISD if not already marked
+        if na(bullish_breaker_cisd_map.get(bullish_breaker_key))
+
+            float box_bottom = na
+            int box_bottom_index = na
+
+            // Find the nearest up-close candle by stepping forward from the L candle
+            // without going past the H
+            if na(box_bottom) and isUpClose(bullish_i1) 
+                box_bottom := low[bar_index - bullish_i1]
+                box_bottom_index := bullish_i1
+            if na(box_bottom) and isUpClose(bullish_i1 + 1) and (bullish_i1 + 1 <= bullish_i2)
+                box_bottom := low[bar_index - bullish_i1 - 1]
+                box_bottom_index := bullish_i1 + 1
+            if na(box_bottom) and isUpClose(bullish_i1 + 2) and (bullish_i1 + 2 <= bullish_i2)
+                box_bottom := low[bar_index - bullish_i1 - 2]
+                box_bottom_index := bullish_i1 + 2
+            if na(box_bottom) and isUpClose(bullish_i1 + 3) and (bullish_i1 + 3 <= bullish_i2)
+                box_bottom := low[bar_index - bullish_i1 - 3]
+                box_bottom_index := bullish_i1 + 3
+            if na(box_bottom) and isUpClose(bullish_i1 + 4) and (bullish_i1 + 4 <= bullish_i2)
+                box_bottom := low[bar_index - bullish_i1 - 4]
+                box_bottom_index := bullish_i1 + 4
+
+            float box_top = na
+            int box_top_index = na
+
+            // Find the nearest up-close candle by stepping backwards from the H candle
+            // without going past the L candle
+            if na(box_top) and isUpClose(bullish_i2) 
+                box_top := high[bar_index - bullish_i2]
+                box_top_index := bullish_i2
+            if na(box_top) and isUpClose(bullish_i2 - 1) and (bullish_i2 - 1 >= bullish_i1)
+                box_top := high[bar_index - bullish_i2 + 1]
+                box_top_index := bullish_i2 - 1
+            if na(box_top) and isUpClose(bullish_i2 - 2) and (bullish_i2 - 2 >= bullish_i1)
+                box_top := high[bar_index - bullish_i2 + 2]
+                box_top_index := bullish_i2 - 2
+            if na(box_top) and isUpClose(bullish_i2 - 3) and (bullish_i2 - 3 >= bullish_i1)
+                box_top := high[bar_index - bullish_i2 + 3]
+                box_top_index := bullish_i2 - 3
+            if na(box_top) and isUpClose(bullish_i2 - 4) and (bullish_i2 - 4 >= bullish_i1)
+                box_top := high[bar_index - bullish_i2 + 4]
+                box_top_index := bullish_i2 - 4
+
+            // The breaker formation is valid ONLY if there are up-close candles.
+            // If there are no up-close candles, then there is no breaker block.
+            if na(box_top) or na(box_bottom)
+                bullish_breaker_formation_is_valid := false
+
+            if bullish_breaker_formation_is_valid
+
+                // Make sure the BRKR box is shown in case it is only 1 candle
+                if box_top_index == box_bottom_index
+                    box_top_index := (box_top_index + 1)
+
+                bullish_breaker_box = box.new(
+                  left = box_bottom_index,
+                  top = box_top,
+                  right = box_top_index + (bar_index - bullish_i4) + BREAKER_BOX_LENGTH,
+                  bottom = box_bottom,
+                  bgcolor = input_brkr_bullish_color,
+                  border_color = color.new(color.black, 100),
+                  text = "BRKR +",
+                  text_color = color.black,
+                  text_size = size.small,
+                  text_halign = text.align_right
+                  )
+
+                array.push(bullish_breaker_boxes, bullish_breaker_box)
+
+                array.push(bullish_breaker_labels, label.new(x = bullish_i1, y = bullish_v1, text = "+\nL", color=color.green, style=label.style_label_up, size = 9, textcolor=color.white, yloc = yloc.belowbar))
+                array.push(bullish_breaker_labels, label.new(x = bullish_i2, y = bullish_v2, text = "H\n+", color=color.black, style=label.style_label_down, size = 9, textcolor=color.white, yloc = yloc.abovebar))
+                array.push(bullish_breaker_labels, label.new(x = bullish_i3, y = bullish_v3, text = "+\nLL", color=color.black, style=label.style_label_up, size = 9, textcolor=color.white, yloc = yloc.belowbar))
+                array.push(bullish_breaker_labels, label.new(x = bullish_i4, y = bullish_v4, text = "HH\n+", color=color.black, style=label.style_label_down, size = 9, textcolor=color.white, yloc = yloc.abovebar))
+
+                // Track that we already added this bullish BRKR
+                bullish_breaker_cisd_map.put(bullish_breaker_key, "set")
+
+////////////////////////////////////////////////////////////////////////////////
+// BEARISH SETUPS
+////////////////////////////////////////////////////////////////////////////////
+
+var int[] last_bearish_ll_prices_indexes = array.new_int()
+
+var label[] bearish_breaker_labels = array.new<label>()
+var line[] bearish_breaker_labels_cisd_lines = array.new<line>()
+var box[] bearish_breaker_boxes = array.new_box()
+var line[] bearish_breaker_cisd_lines = array.new<line>()
+var float[] bearish_breaker_swing_prices = array.new_float()
+var int[] bearish_breaker_indexes = array.new_int()
+var string[] bearish_breaker_swing_types = array.new_string()
+var bearish_breaker_cisd_map = map.new<string, string>()
+
+// Determine swing points for bearish breakers
+bearish_breaker_swing_low = ta.pivotlow(low, input_bearish_breaker_swing_length, input_bearish_breaker_swing_length)
+bearish_breaker_swing_high = ta.pivothigh(high, input_bearish_breaker_swing_length, input_bearish_breaker_swing_length)
+
+// Remove history
+if (array.size(bearish_breaker_labels) / 4) > input_breaker_history
+    label.delete(array.shift(bearish_breaker_labels)) // H
+    label.delete(array.shift(bearish_breaker_labels)) // L
+    label.delete(array.shift(bearish_breaker_labels)) // HH
+    label.delete(array.shift(bearish_breaker_labels)) // LL
+
+    if array.size(bearish_breaker_labels_cisd_lines) > 0
+        line.delete(array.shift(bearish_breaker_labels_cisd_lines))
+
+    if array.size(bearish_breaker_boxes) > 0
+        box.delete(array.shift(bearish_breaker_boxes))
+
+if hasValue(bearish_breaker_swing_low)
+    array.unshift(bearish_breaker_swing_prices, low[input_bearish_breaker_swing_length])
+    array.unshift(bearish_breaker_indexes, bar_index - input_bearish_breaker_swing_length)
+    array.unshift(bearish_breaker_swing_types, "Low")
+
+if hasValue(bearish_breaker_swing_high)
+    array.unshift(bearish_breaker_swing_prices, high[input_bearish_breaker_swing_length])
+    array.unshift(bearish_breaker_indexes, bar_index - input_bearish_breaker_swing_length)
+    array.unshift(bearish_breaker_swing_types, "High")
+
+// Memory management -- keep the arrays clean
+if array.size(bearish_breaker_swing_prices) > 40
+    array.pop(bearish_breaker_swing_prices)
+    array.pop(bearish_breaker_indexes)
+    array.pop(bearish_breaker_swing_types)
+
+var bearish_breaker_swing_length_neutralized = (input_bearish_breaker_swing_length - 1) >= 0 ? (input_bearish_breaker_swing_length - 1) : 0
+
+// If we have 4 swing points, then we can check if the swing points
+// formed a Breakers formation
+if array.size(bearish_breaker_swing_prices) >= 3 and (bar_index - bearish_breaker_swing_length_neutralized >= 0) and barstate.isconfirmed
+    bearish_t1 = array.get(bearish_breaker_swing_types, 2)
+    bearish_t2 = array.get(bearish_breaker_swing_types, 1)
+    bearish_t3 = array.get(bearish_breaker_swing_types, 0)
+    bearish_i1 = array.get(bearish_breaker_indexes, 2)
+    bearish_i2 = array.get(bearish_breaker_indexes, 1)
+    bearish_i3 = array.get(bearish_breaker_indexes, 0)
+    bearish_i4 = bar_index - bearish_breaker_swing_length_neutralized // Should equal (bar_index - 1)
+    bearish_v1 = close[bar_index - bearish_i1]
+    bearish_v2 = close[bar_index - bearish_i2]
+    bearish_v3 = close[bar_index - bearish_i3]
+    bearish_v4 = close[bar_index - bearish_i4]
+
+    if input_bearish_breaker_swing_confirmation == "Candle Wick"
+        bearish_v1 := high[bar_index - bearish_i1]
+        bearish_v2 := low[bar_index - bearish_i2]
+        bearish_v3 := high[bar_index - bearish_i3]
+        bearish_v4 := low[bar_index - bearish_i4]
+
+    // We need the highest price of the H to compare the HH against.
+    // - If the H is an up-close (bullish) candle, then we need the closing price. This is the highest price.
+    // - If the H is a down-close (bearish) candle, then we need the opening price. This is the highest price.
+    if not isUpClose(bearish_i1) and input_bearish_breaker_swing_confirmation == "Candle Close"
+        bearish_v1 := open[bar_index - bearish_i1]
+
+    // If the L candle is an up-close candle, then we need the opening price for it to be the lowest price.
+    if isUpClose(bearish_i2) and input_bearish_breaker_swing_confirmation == "Candle Close"
+        bearish_v2 := open[bar_index - bearish_i2]
+
+    bearish_breaker_cisd_candle_index = bearish_i2
+    bearish_breaker_cisd_candle_index_og = bearish_breaker_cisd_candle_index
+
+    // We need an up-close candle, so go to each candle until one is found
+    bearish_breaker_cisd_candle_index := getNextUpCloseCandle(bearish_breaker_cisd_candle_index_og, bearish_breaker_cisd_candle_index, 1)
+    bearish_breaker_cisd_candle_index := getNextUpCloseCandle(bearish_breaker_cisd_candle_index_og, bearish_breaker_cisd_candle_index, 2)
+    bearish_breaker_cisd_candle_index := getNextUpCloseCandle(bearish_breaker_cisd_candle_index_og, bearish_breaker_cisd_candle_index, 3)
+    bearish_breaker_cisd_candle_index := getNextUpCloseCandle(bearish_breaker_cisd_candle_index_og, bearish_breaker_cisd_candle_index, 4)
+
+    // This opening price should be from the up-close candle we found above
+    bearish_breaker_cisd_candle_open = getPriceOpen(bearish_breaker_cisd_candle_index)
+    
+    has_high_low_high = bearish_t1 == "High" and bearish_t2 == "Low" and bearish_t3 == "High"
+    has_all_bearish_swing_points = has_high_low_high and (bearish_v3 > bearish_v1) and (bearish_v4 < bearish_breaker_cisd_candle_open) and (not isUpClose(bearish_i4)) and hasValue(bearish_breaker_cisd_candle_open)
+
+    if has_all_bearish_swing_points
+        array.unshift(bearish_breaker_swing_prices, bearish_v4)
+        array.unshift(bearish_breaker_indexes, bearish_i4)
+        array.unshift(bearish_breaker_swing_types, "Low")
+
+    // The swing points cannot be on the same candle
+    if bearish_i1 == bearish_i2 or bearish_i2 == bearish_i3 or bearish_i3 == bearish_i4
+        has_all_bearish_swing_points := false
+
+    if inputIsBearish(input_global_show_setups) and has_all_bearish_swing_points
+
+        bearish_breaker_formation_is_valid = true
+        
+        bearish_breaker_key = "bearish_breaker:" + valToString(bearish_v1) + "_" + valToString(bearish_v2) + "_" + valToString(bearish_v3) + "_" + valToString(bearish_v4) + "_" + valToString(input_bearish_breaker_swing_length)
+
+        // Mark out bearish CISD if not already marked
+        if na(bearish_breaker_cisd_map.get(bearish_breaker_key))
+
+            float box_top = na
+            int box_top_index = na
+
+            // Find the nearest down-close candle by stepping forward from the H candle
+            // without going past the L candle
+            if na(box_top) and not isUpClose(bearish_i1) 
+                box_top := high[bar_index - bearish_i1]
+                box_top_index := bearish_i1
+            if na(box_top) and not isUpClose(bearish_i1 + 1) and (bearish_i1 + 1 >= bearish_i2)
+                box_top := high[bar_index - bearish_i1 - 1]
+                box_top_index := bearish_i1 + 1
+            if na(box_top) and not isUpClose(bearish_i1 + 2) and (bearish_i1 + 2 >= bearish_i2)
+                box_top := high[bar_index - bearish_i1 - 2]
+                box_top_index := bearish_i1 + 2
+            if na(box_top) and not isUpClose(bearish_i1 + 3) and (bearish_i1 + 3 >= bearish_i2)
+                box_top := high[bar_index - bearish_i1 - 3]
+                box_top_index := bearish_i1 + 3
+            if na(box_top) and not isUpClose(bearish_i1 + 4) and (bearish_i1 + 4 >= bearish_i2)
+                box_top := high[bar_index - bearish_i1 - 4]
+                box_top_index := bearish_i1 + 4
+
+            float box_bottom = na
+            int box_bottom_index = na
+
+            // Find the nearest down-close candle by stepping backwards from the L candle
+            // without going past the H candle
+            if na(box_bottom) and not isUpClose(bearish_i2) 
+                box_bottom := low[bar_index - bearish_i2]
+                box_bottom_index := bearish_i2
+            if na(box_bottom) and not isUpClose(bearish_i2 - 1) and (bearish_i2 - 1 >= bearish_i1)
+                box_bottom := low[bar_index - bearish_i2 + 1]
+                box_bottom_index := bearish_i2 - 1
+            if na(box_bottom) and not isUpClose(bearish_i2 - 2) and (bearish_i2 - 2 >= bearish_i1)
+                box_bottom := low[bar_index - bearish_i2 + 2]
+                box_bottom_index := bearish_i2 - 2
+            if na(box_bottom) and not isUpClose(bearish_i2 - 3) and (bearish_i2 - 3 >= bearish_i1)
+                box_bottom := low[bar_index - bearish_i2 + 3]
+                box_bottom_index := bearish_i2 - 3
+            if na(box_bottom) and not isUpClose(bearish_i2 - 4) and (bearish_i2 - 4 >= bearish_i1)
+                box_bottom := low[bar_index - bearish_i2 + 4]
+                box_bottom_index := bearish_i2 - 4
+
+            if na(box_top) or na(box_bottom)
+                bearish_breaker_formation_is_valid := false
+
+            if bearish_breaker_formation_is_valid
+
+                // Make sure the BRKR box is shown in case it is only 1 candle
+                if box_top_index == box_bottom_index
+                    box_bottom_index := (box_bottom_index + 1)
+
+                bearish_breaker_box = box.new(
+                  left = box_top_index,
+                  top = box_top,
+                  right = box_bottom_index + (bar_index - bearish_i4) + BREAKER_BOX_LENGTH,
+                  bottom = box_bottom,
+                  bgcolor = input_brkr_bearish_color,
+                  border_color = color.new(color.black, 100),
+                  text = "BRKR -",
+                  text_color = color.black,
+                  text_size = size.small,
+                  text_halign = text.align_right
+                  )
+
+                array.push(bearish_breaker_boxes, bearish_breaker_box)
+
+                array.push(bearish_breaker_labels, label.new(x = bearish_i1, y = bearish_v1, text = "H\n-", color = color.red, style = label.style_label_down, size = 9, textcolor = color.white, yloc = yloc.abovebar))
+                array.push(bearish_breaker_labels, label.new(x = bearish_i2, y = bearish_v2, text = "-\nL", color = color.black, style = label.style_label_up, size = 9, textcolor = color.white, yloc = yloc.belowbar))
+                array.push(bearish_breaker_labels, label.new(x = bearish_i3, y = bearish_v3, text = "HH\n-", color = color.black, style = label.style_label_down, size = 9, textcolor = color.white, yloc = yloc.abovebar))
+                array.push(bearish_breaker_labels, label.new(x = bearish_i4, y = bearish_v4, text = "-\nLL", color = color.black, style = label.style_label_up, size = 9, textcolor = color.white, yloc = yloc.belowbar))
+
+                // Track that we already added this bearish BRKR
+                bearish_breaker_cisd_map.put(bearish_breaker_key, "set")
