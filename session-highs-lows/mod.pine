@@ -1,0 +1,497 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © crookse
+// supercrookstradingbros.com
+//
+
+//@version=6
+indicator("Super Crooks - Session Highs/Lows", overlay = true, max_labels_count = 500, max_lines_count = 500)
+
+
+const string SCRIPT_VERSION = "v1.0.0"
+
+////////////////////////////////////////////////////////////////////////////////
+// SESSIONS INPUTS
+////////////////////////////////////////////////////////////////////////////////
+
+var input_sessions_liquidity = input.string("Both", "Show Session Liquidity Sweeps", options = ["Both", "Highs", "Lows", "None"], group = "Sessions")
+var input_sessions_liquidity_labels = input.string("Name", "Session Liquidity Labels", options = ["Name", "Name and Date"], group = "Sessions")
+var input_sessions_liquidity_history_highs = input.int(75, "Session Liquidity History (Highs)", minval = 1, group = "Sessions")
+var input_sessions_liquidity_history_lows = input.int(75, "Session Liquidity History (Lows)", minval = 1, group = "Sessions")
+
+string utc_datetime  = str.format_time(time, "yyyy/MM/dd", "UTC+0")
+
+var gmt_tz = "GMT+0"
+time_current_hour   = hour(time)
+time_current_minute = minute(time)
+
+var current_timeframe = "NA"
+
+if timeframe.period == "5"
+    current_timeframe := "5m"
+if timeframe.period == "15"
+    current_timeframe := "15m"
+if timeframe.period == "60"
+    current_timeframe := "1h"
+if timeframe.period == "240"
+    current_timeframe := "4h"
+if timeframe.period == "1D"
+    current_timeframe := "1D"
+
+var current_timeframe_string = " (" + current_timeframe + ")"
+
+new_dow_time = time
+new_day = dayofweek(new_dow_time, gmt_tz) != dayofweek(new_dow_time, gmt_tz)[1]
+
+////////////////////////////////////////////////////////////////////////////////
+// SESSIONS
+////////////////////////////////////////////////////////////////////////////////
+
+session_tz = "America/New_York"
+
+tf_asia_session = time(timeframe.period, "2000-0000", session_tz)
+tf_after_asia_session = time(timeframe.period, "0001-1659", session_tz)
+tf_london_session = time(timeframe.period, "0200-0500", session_tz)
+tf_after_london_session = time(timeframe.period, "0501-1659", session_tz)
+tf_ny_am_session = time(timeframe.period, "0830-1130", session_tz)
+tf_after_ny_am_session = time(timeframe.period, "1131-1659", session_tz)
+tf_ny_pm_session = time(timeframe.period, "1300-1600", session_tz)
+
+in_asia_session = not na(tf_asia_session)
+in_after_asia_session = not na(tf_after_asia_session)
+in_london_session = not na(tf_london_session)
+in_after_london_session = not na(tf_after_london_session)
+in_ny_am_session = not na(tf_ny_am_session)
+in_after_ny_am_session = not na(tf_after_ny_am_session)
+in_ny_pm_session = not na(tf_ny_pm_session)
+
+var liquidity_sweeps_added_highs = map.new<string, string>()
+var liquidity_sweep_highs = map.new<string, float>()
+var liquidity_sweep_highs_map_line = map.new<string, line>()
+var liquidity_sweep_highs_map_label = map.new<string, label>()
+
+var liquidity_sweeps_added_lows = map.new<string, string>()
+var liquidity_sweep_lows = map.new<string, float>()
+var liquidity_sweep_lows_map_line = map.new<string, line>()
+var liquidity_sweep_lows_map_label = map.new<string, label>()
+
+liquidity_sweep_highs_map_line_len = map.keys(liquidity_sweep_highs_map_line)
+
+while array.size(map.keys(liquidity_sweep_highs_map_line)) > input_sessions_liquidity_history_highs
+    key = liquidity_sweep_highs_map_line_len.get(0)
+
+    liquidity_sweep_highs.remove(key)
+
+    line.delete(liquidity_sweep_highs_map_line.get(key))
+    liquidity_sweep_highs_map_line.remove(key)
+
+    label.delete(liquidity_sweep_highs_map_label.get(key))
+    liquidity_sweep_highs_map_label.remove(key)
+
+liquidity_sweep_lows_map_line_len = map.keys(liquidity_sweep_lows_map_line)
+
+while array.size(map.keys(liquidity_sweep_lows_map_line)) > input_sessions_liquidity_history_lows
+    key = liquidity_sweep_lows_map_line_len.get(0)
+
+    liquidity_sweep_lows.remove(key)
+
+    line.delete(liquidity_sweep_lows_map_line.get(key))
+    liquidity_sweep_lows_map_line.remove(key)
+
+    label.delete(liquidity_sweep_lows_map_label.get(key))
+    liquidity_sweep_lows_map_label.remove(key)
+
+checkSessionLiquiditySweepsHighs() =>
+    for [key, value] in liquidity_sweep_highs
+
+        if high > value or close > value and barstate.isconfirmed
+            if na(liquidity_sweeps_added_highs.get(key))
+
+                liquidity_line = liquidity_sweep_highs_map_line.get(key)
+                line.set_x2(liquidity_line, time)
+
+                liquidity_label = liquidity_sweep_highs_map_label.get(key)
+                liquidity_label_str = liquidity_label.get_text()
+                label.set_text(liquidity_label, str.replace(liquidity_label_str, " (OPEN)", ""))
+                label.set_xloc(liquidity_label, bar_index, xloc.bar_index)
+
+                liquidity_sweeps_added_highs.put(key, "set")
+
+checkSessionLiquiditySweepsLows() =>
+    for [key, value] in liquidity_sweep_lows
+
+        if low < value or close < value and barstate.isconfirmed
+            if na(liquidity_sweeps_added_lows.get(key))
+
+                liquidity_line = liquidity_sweep_lows_map_line.get(key)
+                line.set_x2(liquidity_line, time)
+
+                liquidity_label = liquidity_sweep_lows_map_label.get(key)
+                liquidity_label_str = liquidity_label.get_text()
+                label.set_text(liquidity_label, str.replace(liquidity_label_str, " (OPEN)", ""))
+                label.set_xloc(liquidity_label, bar_index, xloc.bar_index)
+
+                liquidity_sweeps_added_lows.put(key, "set")
+
+var string last_asia_session_key_high = na
+var string last_asia_session_key_low = na
+var string last_london_session_key_high = na
+var string last_london_session_key_low = na
+var string last_ny_am_session_key_high = na
+var string last_ny_am_session_key_low = na
+var string last_ny_pm_session_key_high = na
+var string last_ny_pm_session_key_low = na
+
+if new_day
+    last_asia_session_key_high := na
+    last_asia_session_key_low := na
+    last_london_session_key_high := na
+    last_london_session_key_low := na
+    last_ny_am_session_key_high := na
+    last_ny_am_session_key_low := na
+    last_ny_pm_session_key_high := na
+    last_ny_pm_session_key_low := na
+
+addSessionLiquidityOpenLineHigh(
+  int candle_time,
+  string label_text,
+  string new_key,
+  string old_key
+  ) =>
+
+    if (input_sessions_liquidity == "Both" or input_sessions_liquidity == "Highs") and input_sessions_liquidity != "None"
+
+        forward_time = 3600000 * 2
+        bar_xloc = xloc.bar_time
+        // forward_time = 5 // 5 bars
+        // bar_xloc = xloc.bar_index
+
+        sweep_line = line.new(
+          x1 = candle_time,
+          y1 = high,
+          x2 = candle_time + forward_time,
+          y2 = high,
+          color = color.new(color.black, 0),
+          style = line.style_dotted,
+          width = 1,
+          xloc = bar_xloc
+          )
+
+        sweep_line_label = label.new(
+          x = candle_time + forward_time,
+          y = high,
+          text = label_text + " (OPEN)\n",
+          color = color.new(color.black, 100),
+          style = label.style_label_right,
+          size = 9, // label size
+          textcolor = color.black,
+          yloc = yloc.price,
+          xloc = bar_xloc
+          )
+
+        // If there was a previously plotted OPEN line, delete it
+        if not na(old_key)
+            line.delete(liquidity_sweep_highs_map_line.get(old_key))
+            label.delete(liquidity_sweep_highs_map_label.get(old_key))
+
+            liquidity_sweep_highs.remove(old_key)
+            liquidity_sweep_highs_map_line.remove(old_key)
+            liquidity_sweep_highs_map_label.remove(old_key)
+
+        // Add the OPEN lines
+        liquidity_sweep_highs.put(new_key, high)
+        liquidity_sweep_highs_map_line.put(new_key, sweep_line)
+        liquidity_sweep_highs_map_label.put(new_key, sweep_line_label)
+
+addSessionLiquidityOpenLineLow(
+  int candle_time,
+  string label_text,
+  string new_key,
+  string old_key
+  ) =>
+
+    if (input_sessions_liquidity == "Both" or input_sessions_liquidity == "Lows") and input_sessions_liquidity != "None"
+
+        forward_time = 3600000 * 2
+        bar_xloc = xloc.bar_time
+        // forward_time = 5 // 5 bars
+        // bar_xloc = xloc.bar_index
+
+        if current_timeframe == "60"
+            forward_time := forward_time * 2
+
+        sweep_line = line.new(
+          x1 = candle_time,
+          y1 = low,
+          x2 = candle_time + forward_time,
+          y2 = low,
+          color = color.new(color.black, 0),
+          style = line.style_dotted,
+          width = 1,
+          xloc = bar_xloc
+          )
+
+        sweep_line_label = label.new(
+          x = candle_time + forward_time,
+          y = low,
+          text = "\n" + label_text + " (OPEN)",
+          color = color.new(color.black, 100),
+          style = label.style_label_right,
+          size = 9, // label size
+          textcolor = color.black,
+          yloc = yloc.price,
+          xloc = bar_xloc
+          )
+
+        // If there was a previously plotted OPEN line, delete it
+        if not na(old_key)
+            line.delete(liquidity_sweep_lows_map_line.get(old_key))
+            label.delete(liquidity_sweep_lows_map_label.get(old_key))
+
+            liquidity_sweep_lows.remove(old_key)
+            liquidity_sweep_lows_map_line.remove(old_key)
+            liquidity_sweep_lows_map_label.remove(old_key)
+
+        // Add the OPEN lines
+        liquidity_sweep_lows.put(new_key, low)
+        liquidity_sweep_lows_map_line.put(new_key, sweep_line)
+        liquidity_sweep_lows_map_label.put(new_key, sweep_line_label)
+
+getSessionLiquidityLabel(label_text) =>
+    if input_sessions_liquidity_labels == "Name and Date"
+        label_date  = str.format_time(time, "MM/dd", "UTC+0")
+        label_text + label_date
+    else
+        label_text
+
+var asia_session_highs = map.new<string, float>()
+var asia_session_highs_times = map.new<string, int>()
+var asia_session_highs_text = map.new<string, string>()
+var asia_session_lows = map.new<string, float>()
+var asia_session_lows_times = map.new<string, int>()
+var asia_session_lows_text = map.new<string, string>()
+var asia_session_h = asia_session_highs.get(utc_datetime)
+var asia_session_l = asia_session_lows.get(utc_datetime)
+
+var london_session_highs = map.new<string, float>()
+var london_session_highs_times = map.new<string, int>()
+var london_session_highs_text = map.new<string, string>()
+var london_session_lows = map.new<string, float>()
+var london_session_lows_times = map.new<string, int>()
+var london_session_lows_text = map.new<string, string>()
+var london_session_h = london_session_highs.get(utc_datetime)
+var london_session_l = london_session_lows.get(utc_datetime)
+
+var ny_am_session_highs = map.new<string, float>()
+var ny_am_session_highs_times = map.new<string, int>()
+var ny_am_session_highs_text = map.new<string, string>()
+var ny_am_session_lows = map.new<string, float>()
+var ny_am_session_lows_times = map.new<string, int>()
+var ny_am_session_lows_text = map.new<string, string>()
+var ny_am_session_h = ny_am_session_highs.get(utc_datetime)
+var ny_am_session_l = ny_am_session_lows.get(utc_datetime)
+
+var ny_pm_session_highs = map.new<string, float>()
+var ny_pm_session_highs_times = map.new<string, int>()
+var ny_pm_session_highs_text = map.new<string, string>()
+var ny_pm_session_lows = map.new<string, float>()
+var ny_pm_session_lows_times = map.new<string, int>()
+var ny_pm_session_lows_text = map.new<string, string>()
+var ny_pm_session_h = ny_am_session_highs.get(utc_datetime)
+var ny_pm_session_l = ny_am_session_lows.get(utc_datetime)
+
+if new_day
+    asia_session_h := na
+    asia_session_l := na
+
+    london_session_h := na
+    london_session_l := na
+
+    ny_am_session_h := na
+    ny_am_session_l := na
+
+    ny_pm_session_h := na
+    ny_pm_session_l := na
+
+var session_history = 30 // days
+
+asia_session_highs_arr = map.keys(asia_session_highs)
+if array.size(asia_session_highs_arr) > session_history
+    asia_session_highs.remove(asia_session_highs_arr.get(0))
+    asia_session_highs_times.remove(asia_session_highs_arr.get(0))
+    asia_session_highs_text.remove(asia_session_highs_arr.get(0))
+
+asia_session_lows_arr = map.keys(asia_session_lows)
+if array.size(asia_session_lows_arr) > session_history
+    asia_session_lows.remove(asia_session_lows_arr.get(0))
+    asia_session_lows_times.remove(asia_session_lows_arr.get(0))
+    asia_session_lows_text.remove(asia_session_lows_arr.get(0))
+
+london_session_highs_arr = map.keys(london_session_highs)
+if array.size(london_session_highs_arr) > session_history
+    london_session_highs.remove(london_session_highs_arr.get(0))
+    london_session_highs_times.remove(london_session_highs_arr.get(0))
+    london_session_highs_text.remove(london_session_highs_arr.get(0))
+
+london_session_lows_arr = map.keys(london_session_lows)
+if array.size(london_session_lows_arr) > session_history
+    london_session_lows.remove(london_session_lows_arr.get(0))
+    london_session_lows_times.remove(london_session_lows_arr.get(0))
+    london_session_lows_text.remove(london_session_lows_arr.get(0))
+
+ny_am_session_highs_arr = map.keys(ny_am_session_highs)
+if array.size(ny_am_session_highs_arr) > session_history
+    ny_am_session_highs.remove(ny_am_session_highs_arr.get(0))
+    ny_am_session_highs_times.remove(ny_am_session_highs_arr.get(0))
+    ny_am_session_highs_text.remove(ny_am_session_highs_arr.get(0))
+
+ny_am_session_lows_arr = map.keys(ny_am_session_lows)
+if array.size(ny_am_session_lows_arr) > session_history
+    ny_am_session_lows.remove(ny_am_session_lows_arr.get(0))
+    ny_am_session_lows_times.remove(ny_am_session_lows_arr.get(0))
+    ny_am_session_lows_text.remove(ny_am_session_lows_arr.get(0))
+
+ny_pm_session_highs_arr = map.keys(ny_pm_session_highs)
+if array.size(ny_pm_session_highs_arr) > session_history
+    ny_pm_session_highs.remove(ny_pm_session_highs_arr.get(0))
+    ny_pm_session_highs_times.remove(ny_pm_session_highs_arr.get(0))
+    ny_pm_session_highs_text.remove(ny_pm_session_highs_arr.get(0))
+
+ny_pm_session_lows_arr = map.keys(ny_pm_session_lows)
+if array.size(ny_pm_session_lows_arr) > session_history
+    ny_pm_session_lows.remove(ny_pm_session_lows_arr.get(0))
+    ny_pm_session_lows_times.remove(ny_pm_session_lows_arr.get(0))
+    ny_pm_session_lows_text.remove(ny_pm_session_lows_arr.get(0))
+
+if in_asia_session and input_sessions_liquidity != "None"
+    asia_session_h := na(asia_session_h[1]) ? high : math.max(high, asia_session_h[1])
+    asia_session_l := na(asia_session_l[1]) ? low  : math.min(low, asia_session_l[1])
+
+    // Plot the high if it doesn't exist or if the current high is higher than
+    // the previously plotted one
+    if na(asia_session_h[1]) or high > asia_session_h[1]
+        label_text = getSessionLiquidityLabel("AS.H ")
+        new_key = str.tostring(time) + "_" + label_text + "_" + str.tostring(high)
+
+        addSessionLiquidityOpenLineHigh(time, label_text, new_key, last_asia_session_key_high)
+
+        asia_session_highs.put(utc_datetime, high)
+        asia_session_highs_times.put(utc_datetime, time)
+        asia_session_highs_text.put(utc_datetime, label_text)
+
+        last_asia_session_key_high := new_key
+
+    // Plot the low if it doesn't exist or if the current high is lower than
+    // the previously plotted one
+    if na(asia_session_l[1]) or low < asia_session_l[1]
+        label_text = getSessionLiquidityLabel("AS.L ")
+        new_key = str.tostring(time) + "_" + label_text + "_" + str.tostring(low)
+
+        addSessionLiquidityOpenLineLow(time, label_text, new_key, last_asia_session_key_low)
+
+        asia_session_lows.put(utc_datetime, low)
+        asia_session_lows_times.put(utc_datetime, time)
+        asia_session_lows_text.put(utc_datetime, label_text)
+
+        last_asia_session_key_low := new_key
+
+if in_london_session and input_sessions_liquidity != "None"
+    london_session_h := na(london_session_h[1]) ? high : math.max(high, london_session_h[1])
+    london_session_l := na(london_session_l[1]) ? low  : math.min(low, london_session_l[1])
+
+    // Plot the high if it doesn't exist or if the current high is higher than
+    // the previously plotted one
+    if na(london_session_h[1]) or high > london_session_h[1]
+        label_text = getSessionLiquidityLabel("LO.H ")
+        new_key = str.tostring(time) + "_" + label_text + "_" + str.tostring(high)
+
+        addSessionLiquidityOpenLineHigh(time, label_text, new_key, last_london_session_key_high)
+
+        london_session_highs.put(utc_datetime, high)
+        london_session_highs_times.put(utc_datetime, time)
+        london_session_highs_text.put(utc_datetime, label_text)
+
+        last_london_session_key_high := new_key
+
+    // Plot the low if it doesn't exist or if the current high is lower than
+    // the previously plotted one
+    if na(london_session_l[1]) or low < london_session_l[1]
+        label_text = getSessionLiquidityLabel("LO.L ")
+        new_key = str.tostring(time) + "_" + label_text + "_" + str.tostring(low)
+
+        addSessionLiquidityOpenLineLow(time, label_text, new_key, last_london_session_key_low)
+
+        london_session_lows.put(utc_datetime, low)
+        london_session_lows_times.put(utc_datetime, time)
+        london_session_lows_text.put(utc_datetime, label_text)
+
+        last_london_session_key_low := new_key
+
+if in_ny_am_session and input_sessions_liquidity != "None"
+    ny_am_session_h := na(ny_am_session_h[1]) ? high : math.max(high, ny_am_session_h[1])
+    ny_am_session_l := na(ny_am_session_l[1]) ? low  : math.min(low, ny_am_session_l[1])
+
+    // Plot the high if it doesn't exist or if the current high is higher than
+    // the previously plotted one
+    if na(ny_am_session_h[1]) or high > ny_am_session_h[1]
+        label_text = getSessionLiquidityLabel("NYA.H ")
+        new_key = str.tostring(time) + "_" + label_text + "_" + str.tostring(high)
+
+        addSessionLiquidityOpenLineHigh(time, label_text, new_key, last_ny_am_session_key_high)
+
+        ny_am_session_highs.put(utc_datetime, high)
+        ny_am_session_highs_times.put(utc_datetime, time)
+        ny_am_session_highs_text.put(utc_datetime, label_text)
+
+        last_ny_am_session_key_high := new_key
+
+    // Plot the low if it doesn't exist or if the current high is lower than
+    // the previously plotted one
+    if na(ny_am_session_l[1]) or low < ny_am_session_l[1]
+        label_text = getSessionLiquidityLabel("NYA.L ")
+        new_key = str.tostring(time) + "_" + label_text + "_" + str.tostring(low)
+
+        addSessionLiquidityOpenLineLow(time, label_text, new_key, last_ny_am_session_key_low)
+
+        ny_am_session_lows.put(utc_datetime, low)
+        ny_am_session_lows_times.put(utc_datetime, time)
+        ny_am_session_lows_text.put(utc_datetime, label_text)
+
+        last_ny_am_session_key_low := new_key
+
+if in_ny_pm_session and input_sessions_liquidity != "None"
+    ny_pm_session_h := na(ny_pm_session_h[1]) ? high : math.max(high, ny_pm_session_h[1])
+    ny_pm_session_l := na(ny_pm_session_l[1]) ? low  : math.min(low, ny_pm_session_l[1])
+
+    // Plot the high if it doesn't exist or if the current high is higher than
+    // the previously plotted one
+    if na(ny_pm_session_h[1]) or high > ny_pm_session_h[1]
+        label_text = getSessionLiquidityLabel("NYP.H ")
+        new_key = str.tostring(time) + "_" + label_text + "_" + str.tostring(high)
+
+        addSessionLiquidityOpenLineHigh(time, label_text, new_key, last_ny_pm_session_key_high)
+
+        ny_pm_session_highs.put(utc_datetime, high)
+        ny_pm_session_highs_times.put(utc_datetime, time)
+        ny_pm_session_highs_text.put(utc_datetime, label_text)
+
+        last_ny_pm_session_key_high := new_key
+
+    // Plot the low if it doesn't exist or if the current high is lower than
+    // the previously plotted one
+    if na(ny_pm_session_l[1]) or low < ny_pm_session_l[1]
+        label_text = getSessionLiquidityLabel("NYP.L ")
+        new_key = str.tostring(time) + "_" + label_text + "_" + str.tostring(low)
+
+        addSessionLiquidityOpenLineLow(time, label_text, new_key, last_ny_pm_session_key_low)
+
+        ny_pm_session_lows.put(utc_datetime, low)
+        ny_pm_session_lows_times.put(utc_datetime, time)
+        ny_pm_session_lows_text.put(utc_datetime, label_text)
+
+        last_ny_pm_session_key_low := new_key
+
+if input_sessions_liquidity != "None" and (input_sessions_liquidity == "Both" or input_sessions_liquidity == "Highs")
+    checkSessionLiquiditySweepsHighs()
+
+if input_sessions_liquidity != "None" and (input_sessions_liquidity == "Both" or input_sessions_liquidity == "Lows")
+    checkSessionLiquiditySweepsLows()
