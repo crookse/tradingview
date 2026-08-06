@@ -27,6 +27,7 @@ input_line_width = input.int(1, "Line Width", minval=1, maxval=4)
 input_line_style = input.string("Solid", "Line Style", options=["Solid", "Dashed", "Dotted"])
 input_show_high_price = input.bool(false, "Show High Price")
 input_show_low_price = input.bool(false, "Show Low Price")
+input_show_date_labels = input.bool(false, "Show Dates")
 
 getStyle(s) =>
     s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
@@ -109,11 +110,16 @@ for i = 0 to n - 1
     days_index = (n - 2) - i
     suffix = is_today ? "" : str.tostring(days_index)
 
+    string curDate = str.format_time(timenow - (time_1_hour * (24 * (days_index))), "MM/dd")
+
     // If suffix is 0, don't show PDH/PDL0. Just show PDH/PDL.
     suffix := days_index == 0 ? "" : suffix
 
     pdh_label = is_today ? "CDH" : "PDH"
     pdl_label = is_today ? "CDL" : "PDL"
+
+    if input_show_date_labels == true
+        suffix := " " + curDate
 
     high_price = line.get_y1(array.get(high_lines, i))
     low_price = line.get_y1(array.get(low_lines, i))
