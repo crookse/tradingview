@@ -1,0 +1,133 @@
+//@version=6
+indicator("Super Crooks - 4H Sweep/Close", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
+
+// ───────── Inputs ─────────
+setupMode     = input.string("Both", "Show setups", options=["Bearish", "Bullish", "Both"],
+                 tooltip="Bearish: a bullish candle swept by a bearish candle (sweeps the high).\nBullish: a bearish candle swept by a bullish candle (sweeps the low).")
+closeMode     = input.string("Beyond prior close", "Sweep candle must close",
+                 options=["Beyond prior close", "Inside prior body", "Beyond prior open"],
+                 tooltip="Bearish setups: close below the bullish candle's close / inside its body / below its open.\nBullish setups: close above the bearish candle's close / inside its body / above its open.")
+minSweepTicks = input.int(0, "Min sweep beyond prior high/low (ticks)", minval=0)
+minBodyPct    = input.float(0.0, "Min prior candle body (% of its range)", minval=0, maxval=100, step=5,
+                 tooltip="Filters out tiny doji-like candles. 0 = off.")
+
+use1H         = input.bool(true, "Show on 1 hour", group="Timeframes")
+use4H         = input.bool(true, "Show on 4 hour", group="Timeframes")
+show4HOn1H    = input.bool(true, "Show 4H sweeps on the 1 hour chart", group="Timeframes")
+
+showHighlight = input.bool(false, "Highlight both candles", group="Display")
+showLabel     = input.bool(true, "Show label", group="Display")
+showLine      = input.bool(true, "Draw line at swept high/low", group="Display")
+color4H       = input.color(color.red, "4H bearish color", group="Display")
+color1H       = input.color(color.orange, "1H bearish color", group="Display")
+color4HBull   = input.color(color.green, "4H bullish color", group="Display")
+color1HBull   = input.color(color.blue, "1H bullish color", group="Display")
+
+label1HBear   = input.string("1HS-", "1H bearish label text", group="Labels")
+label4HBear   = input.string("4HS-", "4H bearish label text", group="Labels")
+label1HBull   = input.string("1HS+", "1H bullish label text", group="Labels")
+label4HBull   = input.string("4HS+", "4H bullish label text", group="Labels")
+
+showBear = setupMode != "Bullish"
+showBull = setupMode != "Bearish"
+
+// 4H sweeps always use the 4H colors and labels (on the 4H chart and when shown on the 1H chart).
+// 1H sweeps use the 1H colors and labels.
+is1HChart     = timeframe.period == "60"
+bearColor     = is1HChart ? color1H : color4H
+bullColor     = is1HChart ? color1HBull : color4HBull
+bearText      = is1HChart ? label1HBear : label4HBear
+bullText      = is1HChart ? label1HBull : label4HBull
+
+// ───────── Pattern logic ─────────
+// Candle [1] = prior candle, Candle [0] = sweeping candle
+
+// Bearish setup: bullish candle, then bearish candle sweeps its high and closes below its close
+bearPattern() =>
+    prevBull  = close[1] > open[1]
+    currBear  = close < open
+    rng       = high[1] - low[1]
+    bodyOk    = rng > 0 and (close[1] - open[1]) / rng * 100 >= minBodyPct
+    swept     = high > high[1] + minSweepTicks * syminfo.mintick
+    closeOk = switch closeMode
+        "Beyond prior close" => close < close[1]
+        "Inside prior body"  => close < close[1] and close > open[1]
+        => close < open[1]
+    prevBull and currBear and bodyOk and swept and closeOk
+
+// Bullish setup: bearish candle, then bullish candle sweeps its low and closes above its close
+bullPattern() =>
+    prevBear  = close[1] < open[1]
+    currBull  = close > open
+    rng       = high[1] - low[1]
+    bodyOk    = rng > 0 and (open[1] - close[1]) / rng * 100 >= minBodyPct
+    swept     = low < low[1] - minSweepTicks * syminfo.mintick
+    closeOk = switch closeMode
+        "Beyond prior close" => close > close[1]
+        "Inside prior body"  => close > close[1] and close < open[1]
+        => close > open[1]
+    prevBear and currBull and bodyOk and swept and closeOk
+
+// ───────── Native signals (1H / 4H chart) ─────────
+tfOk       = (use1H and timeframe.period == "60") or (use4H and timeframe.period == "240")
+bearSignal = showBear and tfOk and bearPattern() and barstate.isconfirmed
+bullSignal = showBull and tfOk and bullPattern() and barstate.isconfirmed
+hlColor    = bearSignal ? color.new(bearColor, 85) : bullSignal ? color.new(bullColor, 85) : na
+
+bgcolor(showHighlight ? hlColor : na)               // sweeping candle
+bgcolor(showHighlight ? hlColor : na, offset=-1)    // prior candle
+
+drawNative(level, txt, col) =>
+    if showLine
+        // From the prior candle's high/low to 3 bars past the sweeping candle
+        line.new(bar_index - 1, level, bar_index + 3, level,
+                 color=col, style=line.style_solid, width=1)
+    if showLabel
+        // Text-only label at the right end of the line
+        label.new(bar_index + 3, level, txt, style=label.style_label_left,
+                  color=color.new(color.white, 100), textcolor=col, size=size.small)
+
+if bearSignal
+    drawNative(high[1], bearText, bearColor)
+if bullSignal
+    drawNative(low[1], bullText, bullColor)
+
+// ───────── 4H sweeps projected onto the 1H chart ─────────
+// Evaluated on the last *closed* 4H candle (no repainting).
+// Prior 4H candle = [2], sweeping 4H candle = [1]
+htfData() =>
+    sBear = bearPattern()
+    sBull = bullPattern()
+    [sBear[1], sBull[1], high[2], low[2], math.max(high[1], high[2]), math.min(low[1], low[2]), time[2], time_close[1]]
+
+[h4Bear, h4Bull, h4PrevHigh, h4PrevLow, h4Top, h4Bot, h4PrevOpenT, h4SweepCloseT] =
+     request.security(syminfo.tickerid, "240", htfData(), lookahead=barmerge.lookahead_on)
+
+FOUR_H_MS  = 4 * 60 * 60 * 1000
+htfOk      = show4HOn1H and timeframe.period == "60" and timeframe.change("240")
+htfBearSig = htfOk and showBear and h4Bear
+htfBullSig = htfOk and showBull and h4Bull
+
+drawHtf(level, txt, col) =>
+    if showHighlight
+        box.new(h4PrevOpenT, h4Top, h4SweepCloseT, h4Bot, xloc=xloc.bar_time,
+                border_color=col, border_width=1, bgcolor=color.new(col, 88))
+    if showLine
+        // From the 4H prior candle's high/low to 3 (4H) bars past the 4H sweeping candle
+        line.new(h4PrevOpenT, level, h4SweepCloseT + 3 * FOUR_H_MS, level, xloc=xloc.bar_time,
+                 color=col, style=line.style_solid, width=2)
+    if showLabel
+        label.new(h4SweepCloseT + 3 * FOUR_H_MS, level, txt, xloc=xloc.bar_time,
+                  style=label.style_label_left, color=color.new(color.white, 100),
+                  textcolor=col, size=size.small)
+
+if htfBearSig
+    drawHtf(h4PrevHigh, label4HBear, color4H)
+if htfBullSig
+    drawHtf(h4PrevLow, label4HBull, color4HBull)
+
+// ───────── Alerts ─────────
+alertcondition(bearSignal, "Bearish sweep", "Bearish candle swept the prior bullish high and closed below its close on {{ticker}} {{interval}}")
+alertcondition(bullSignal, "Bullish sweep", "Bullish candle swept the prior bearish low and closed above its close on {{ticker}} {{interval}}")
+alertcondition(htfBearSig, "4H bearish sweep (on 1H chart)", "4H bearish sweep confirmed on {{ticker}}")
+alertcondition(htfBullSig, "4H bullish sweep (on 1H chart)", "4H bullish sweep confirmed on {{ticker}}")
