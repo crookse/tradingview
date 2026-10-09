@@ -11,9 +11,10 @@ minSweepTicks = input.int(0, "Min sweep beyond prior high/low (ticks)", minval=0
 minBodyPct    = input.float(0.0, "Min prior candle body (% of its range)", minval=0, maxval=100, step=5,
                  tooltip="Filters out tiny doji-like candles. 0 = off.")
 
-use1H         = input.bool(true, "Show on 1 hour", group="Timeframes")
-use4H         = input.bool(true, "Show on 4 hour", group="Timeframes")
-show4HOn1H    = input.bool(true, "Show 4H sweeps on the 1 hour chart", group="Timeframes")
+show4H        = input.bool(true, "Show 4H sweeps", group="Timeframes",
+                 tooltip="Shown on the 4H, 1H, 30m, 15m, 5m, 4m and 3m charts.")
+show1H        = input.bool(true, "Show 1H sweeps", group="Timeframes",
+                 tooltip="Shown on the 1H, 30m, 15m, 5m, 4m and 3m charts.")
 
 showHighlight = input.bool(false, "Highlight both candles", group="Display")
 showLabel     = input.bool(true, "Show label", group="Display")
@@ -31,13 +32,10 @@ label4HBull   = input.string("4HS+", "4H bullish label text", group="Labels")
 showBear = setupMode != "Bullish"
 showBull = setupMode != "Bearish"
 
-// 4H sweeps always use the 4H colors and labels (on the 4H chart and when shown on the 1H chart).
-// 1H sweeps use the 1H colors and labels.
-is1HChart     = timeframe.period == "60"
-bearColor     = is1HChart ? color1H : color4H
-bullColor     = is1HChart ? color1HBull : color4HBull
-bearText      = is1HChart ? label1HBear : label4HBear
-bullText      = is1HChart ? label1HBull : label4HBull
+tf      = timeframe.period
+is4H    = tf == "240"
+is1H    = tf == "60"
+isLower = tf == "30" or tf == "15" or tf == "5" or tf == "4" or tf == "3"
 
 // ───────── Pattern logic ─────────
 // Candle [1] = prior candle, Candle [0] = sweeping candle
@@ -68,10 +66,15 @@ bullPattern() =>
         => close > open[1]
     prevBear and currBull and bodyOk and swept and closeOk
 
-// ───────── Native signals (1H / 4H chart) ─────────
-tfOk       = (use1H and timeframe.period == "60") or (use4H and timeframe.period == "240")
-bearSignal = showBear and tfOk and bearPattern() and barstate.isconfirmed
-bullSignal = showBull and tfOk and bullPattern() and barstate.isconfirmed
+// ───────── Native signals (on the 4H chart and the 1H chart) ─────────
+nativeOk   = (show4H and is4H) or (show1H and is1H)
+bearColor  = is1H ? color1H : color4H
+bullColor  = is1H ? color1HBull : color4HBull
+bearText   = is1H ? label1HBear : label4HBear
+bullText   = is1H ? label1HBull : label4HBull
+
+bearSignal = showBear and nativeOk and bearPattern() and barstate.isconfirmed
+bullSignal = showBull and nativeOk and bullPattern() and barstate.isconfirmed
 hlColor    = bearSignal ? color.new(bearColor, 85) : bullSignal ? color.new(bullColor, 85) : na
 
 bgcolor(showHighlight ? hlColor : na)               // sweeping candle
@@ -92,9 +95,10 @@ if bearSignal
 if bullSignal
     drawNative(low[1], bullText, bullColor)
 
-// ───────── 4H sweeps projected onto the 1H chart ─────────
-// Evaluated on the last *closed* 4H candle (no repainting).
-// Prior 4H candle = [2], sweeping 4H candle = [1]
+// ───────── Higher-timeframe sweeps projected onto lower charts ─────────
+// 4H sweeps → 1H, 30m, 15m, 5m, 4m, 3m charts.  1H sweeps → 30m, 15m, 5m, 4m, 3m charts.
+// Evaluated on the last *closed* higher-timeframe candle (no repainting).
+// Prior candle = [2], sweeping candle = [1]
 htfData() =>
     sBear = bearPattern()
     sBull = bullPattern()
@@ -102,32 +106,46 @@ htfData() =>
 
 [h4Bear, h4Bull, h4PrevHigh, h4PrevLow, h4Top, h4Bot, h4PrevOpenT, h4SweepCloseT] =
      request.security(syminfo.tickerid, "240", htfData(), lookahead=barmerge.lookahead_on)
+[h1Bear, h1Bull, h1PrevHigh, h1PrevLow, h1Top, h1Bot, h1PrevOpenT, h1SweepCloseT] =
+     request.security(syminfo.tickerid, "60", htfData(), lookahead=barmerge.lookahead_on)
 
-FOUR_H_MS  = 4 * 60 * 60 * 1000
-htfOk      = show4HOn1H and timeframe.period == "60" and timeframe.change("240")
-htfBearSig = htfOk and showBear and h4Bear
-htfBullSig = htfOk and showBull and h4Bull
+HOUR_MS = 60 * 60 * 1000
 
-drawHtf(level, txt, col) =>
+drawHtf(level, txt, col, prevOpenT, sweepCloseT, top, bot, barMs, w) =>
     if showHighlight
-        box.new(h4PrevOpenT, h4Top, h4SweepCloseT, h4Bot, xloc=xloc.bar_time,
+        box.new(prevOpenT, top, sweepCloseT, bot, xloc=xloc.bar_time,
                 border_color=col, border_width=1, bgcolor=color.new(col, 88))
     if showLine
-        // From the 4H prior candle's high/low to 3 (4H) bars past the 4H sweeping candle
-        line.new(h4PrevOpenT, level, h4SweepCloseT + 3 * FOUR_H_MS, level, xloc=xloc.bar_time,
-                 color=col, style=line.style_solid, width=2)
+        // From the prior candle's high/low to 3 (higher-timeframe) bars past the sweeping candle
+        line.new(prevOpenT, level, sweepCloseT + 3 * barMs, level, xloc=xloc.bar_time,
+                 color=col, style=line.style_solid, width=w)
     if showLabel
-        label.new(h4SweepCloseT + 3 * FOUR_H_MS, level, txt, xloc=xloc.bar_time,
+        label.new(sweepCloseT + 3 * barMs, level, txt, xloc=xloc.bar_time,
                   style=label.style_label_left, color=color.new(color.white, 100),
                   textcolor=col, size=size.small)
 
-if htfBearSig
-    drawHtf(h4PrevHigh, label4HBear, color4H)
-if htfBullSig
-    drawHtf(h4PrevLow, label4HBull, color4HBull)
+// 4H on 1H / 30m / 15m / 5m / 4m / 3m
+h4Ok       = show4H and (is1H or isLower) and timeframe.change("240")
+h4BearSig  = h4Ok and showBear and h4Bear
+h4BullSig  = h4Ok and showBull and h4Bull
+if h4BearSig
+    drawHtf(h4PrevHigh, label4HBear, color4H, h4PrevOpenT, h4SweepCloseT, h4Top, h4Bot, 4 * HOUR_MS, 2)
+if h4BullSig
+    drawHtf(h4PrevLow, label4HBull, color4HBull, h4PrevOpenT, h4SweepCloseT, h4Top, h4Bot, 4 * HOUR_MS, 2)
+
+// 1H on 30m / 15m / 5m / 4m / 3m
+h1Ok       = show1H and isLower and timeframe.change("60")
+h1BearSig  = h1Ok and showBear and h1Bear
+h1BullSig  = h1Ok and showBull and h1Bull
+if h1BearSig
+    drawHtf(h1PrevHigh, label1HBear, color1H, h1PrevOpenT, h1SweepCloseT, h1Top, h1Bot, HOUR_MS, 1)
+if h1BullSig
+    drawHtf(h1PrevLow, label1HBull, color1HBull, h1PrevOpenT, h1SweepCloseT, h1Top, h1Bot, HOUR_MS, 1)
 
 // ───────── Alerts ─────────
-alertcondition(bearSignal, "Bearish sweep", "Bearish candle swept the prior bullish high and closed below its close on {{ticker}} {{interval}}")
-alertcondition(bullSignal, "Bullish sweep", "Bullish candle swept the prior bearish low and closed above its close on {{ticker}} {{interval}}")
-alertcondition(htfBearSig, "4H bearish sweep (on 1H chart)", "4H bearish sweep confirmed on {{ticker}}")
-alertcondition(htfBullSig, "4H bullish sweep (on 1H chart)", "4H bullish sweep confirmed on {{ticker}}")
+alertcondition(bearSignal, "Bearish sweep (chart timeframe)", "Bearish sweep on {{ticker}} {{interval}}")
+alertcondition(bullSignal, "Bullish sweep (chart timeframe)", "Bullish sweep on {{ticker}} {{interval}}")
+alertcondition(h4BearSig, "4H bearish sweep (lower chart)", "4H bearish sweep confirmed on {{ticker}}")
+alertcondition(h4BullSig, "4H bullish sweep (lower chart)", "4H bullish sweep confirmed on {{ticker}}")
+alertcondition(h1BearSig, "1H bearish sweep (lower chart)", "1H bearish sweep confirmed on {{ticker}}")
+alertcondition(h1BullSig, "1H bullish sweep (lower chart)", "1H bullish sweep confirmed on {{ticker}}")
