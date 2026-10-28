@@ -1,5 +1,7 @@
 # Daily Highs/Lows
 
+See [CHANGELOG.md](CHANGELOG.md) for the version history.
+
 ## Overview
 
 This indicator draws the high and low of previous days. Marking these levels by hand every day is tedious. This indicator draws them automatically and keeps them updated, on the daily chart and every lower timeframe.
