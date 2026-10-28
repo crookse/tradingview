@@ -1,5 +1,7 @@
 # Breakers
 
+See [CHANGELOG.md](CHANGELOG.md) for the version history.
+
 ## Overview
 
 This indicator marks bullish and bearish breaker formations. Breakers are easy to miss when price moves quickly or when you're watching several timeframes. This indicator finds the swing points, labels them and draws a box over the breaker block, on whatever timeframe the chart is on.
