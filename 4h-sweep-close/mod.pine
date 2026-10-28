@@ -1,6 +1,8 @@
 //@version=6
 indicator("Super Crooks - 4H Sweep/Close", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
 
+const string SCRIPT_VERSION = "1.1.1"
+
 // ───────── Inputs ─────────
 setupMode     = input.string("Both", "Show setups", options=["Bearish", "Bullish", "Both"],
                  tooltip="Bearish: a bullish candle swept by a bearish candle (sweeps the high).\nBullish: a bearish candle swept by a bullish candle (sweeps the low).")
@@ -111,13 +113,45 @@ htfData() =>
 
 HOUR_MS = 60 * 60 * 1000
 
-drawHtf(level, txt, col, prevOpenT, sweepCloseT, top, bot, barMs, w) =>
+// Times of the chart bars that made the high and low of the prior higher-timeframe candle ([2]).
+// Tracked on the chart timeframe so lines start at the exact lower-timeframe candle of the swept high/low.
+htfExtremeTimes(htf) =>
+    var float curHi  = na
+    var float curLo  = na
+    var int   curHiT = na
+    var int   curLoT = na
+    var int   hiT1   = na
+    var int   loT1   = na
+    var int   hiT2   = na
+    var int   loT2   = na
+    if timeframe.change(htf)
+        hiT2   := hiT1
+        loT2   := loT1
+        hiT1   := curHiT
+        loT1   := curLoT
+        curHi  := high
+        curLo  := low
+        curHiT := time
+        curLoT := time
+    else
+        if na(curHi) or high > curHi
+            curHi  := high
+            curHiT := time
+        if na(curLo) or low < curLo
+            curLo  := low
+            curLoT := time
+    [hiT2, loT2]
+
+[h4PrevHighT, h4PrevLowT] = htfExtremeTimes("240")
+[h1PrevHighT, h1PrevLowT] = htfExtremeTimes("60")
+
+drawHtf(level, txt, col, lineStartT, prevOpenT, sweepCloseT, top, bot, barMs, w) =>
     if showHighlight
         box.new(prevOpenT, top, sweepCloseT, bot, xloc=xloc.bar_time,
                 border_color=col, border_width=1, bgcolor=color.new(col, 88))
     if showLine
-        // From the prior candle's high/low to 3 (higher-timeframe) bars past the sweeping candle
-        line.new(prevOpenT, level, sweepCloseT + 3 * barMs, level, xloc=xloc.bar_time,
+        // From the chart candle that made the prior candle's high/low to 3 (higher-timeframe) bars past the sweeping candle
+        line.new(nz(lineStartT, prevOpenT), level, sweepCloseT + 3 * barMs, level, xloc=xloc.bar_time,
                  color=col, style=line.style_solid, width=w)
     if showLabel
         label.new(sweepCloseT + 3 * barMs, level, txt, xloc=xloc.bar_time,
@@ -129,18 +163,18 @@ h4Ok       = show4H and (is1H or isLower) and timeframe.change("240")
 h4BearSig  = h4Ok and showBear and h4Bear
 h4BullSig  = h4Ok and showBull and h4Bull
 if h4BearSig
-    drawHtf(h4PrevHigh, label4HBear, color4H, h4PrevOpenT, h4SweepCloseT, h4Top, h4Bot, 4 * HOUR_MS, 2)
+    drawHtf(h4PrevHigh, label4HBear, color4H, h4PrevHighT, h4PrevOpenT, h4SweepCloseT, h4Top, h4Bot, 4 * HOUR_MS, 2)
 if h4BullSig
-    drawHtf(h4PrevLow, label4HBull, color4HBull, h4PrevOpenT, h4SweepCloseT, h4Top, h4Bot, 4 * HOUR_MS, 2)
+    drawHtf(h4PrevLow, label4HBull, color4HBull, h4PrevLowT, h4PrevOpenT, h4SweepCloseT, h4Top, h4Bot, 4 * HOUR_MS, 2)
 
 // 1H on 30m / 15m / 5m / 4m / 3m
 h1Ok       = show1H and isLower and timeframe.change("60")
 h1BearSig  = h1Ok and showBear and h1Bear
 h1BullSig  = h1Ok and showBull and h1Bull
 if h1BearSig
-    drawHtf(h1PrevHigh, label1HBear, color1H, h1PrevOpenT, h1SweepCloseT, h1Top, h1Bot, HOUR_MS, 1)
+    drawHtf(h1PrevHigh, label1HBear, color1H, h1PrevHighT, h1PrevOpenT, h1SweepCloseT, h1Top, h1Bot, HOUR_MS, 1)
 if h1BullSig
-    drawHtf(h1PrevLow, label1HBull, color1HBull, h1PrevOpenT, h1SweepCloseT, h1Top, h1Bot, HOUR_MS, 1)
+    drawHtf(h1PrevLow, label1HBull, color1HBull, h1PrevLowT, h1PrevOpenT, h1SweepCloseT, h1Top, h1Bot, HOUR_MS, 1)
 
 // ───────── Alerts ─────────
 alertcondition(bearSignal, "Bearish sweep (chart timeframe)", "Bearish sweep on {{ticker}} {{interval}}")
