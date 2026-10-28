@@ -1,5 +1,7 @@
 # 4H Sweep/Close
 
+See [CHANGELOG.md](CHANGELOG.md) for the version history.
+
 ## Overview
 
 This indicator marks 4H and 1H candles that sweep the prior candle's high or low and then close back beyond the prior candle's close. Spotting these by hand means flipping between the 4H, 1H and lower timeframes. This indicator marks them automatically on the 4H and 1H charts and projects them onto the 30m, 15m, 5m, 4m and 3m charts.
