@@ -1,0 +1,55 @@
+name: Release Version
+
+# When an indicator's release is published, sets SCRIPT_VERSION in that
+# indicator's mod.pine on main to the release's version (e.g. tag
+# 4h-sweep-close/1.2.0 → SCRIPT_VERSION = "1.2.0") and pushes that as a
+# "chore: bump <indicator> version" commit. Does nothing if main already has it.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update_version:
+    runs-on: ubuntu-latest
+    steps:
+      # main, not the release's tag, so the commit can be pushed to it.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Set SCRIPT_VERSION to the tag's version
+        env:
+          # From the environment rather than inlined, so a tag name can't run as script.
+          TAG: ${{ github.event.release.tag_name }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # <indicator>/<version>, e.g. 4h-sweep-close/1.2.0
+          dir=${TAG%/*}
+          next=${TAG##*/}
+          file="$dir/mod.pine"
+          if [ "$dir" = "$TAG" ] || [ ! -f "$file" ]; then
+            echo "::error::$TAG isn't <indicator>/<version> for an indicator with a mod.pine"
+            exit 1
+          fi
+          if ! echo "$next" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::$next isn't a version"
+            exit 1
+          fi
+          version=$(sed -nE 's/^const string SCRIPT_VERSION = "([^"]+)".*/\1/p' "$file")
+          if [ -z "$version" ]; then
+            echo "::error file=$file::No SCRIPT_VERSION found"
+            exit 1
+          fi
+          if [ "$next" = "$version" ]; then
+            echo "$file is already at $next"
+            exit 0
+          fi
+          sed -i -E "s/^(const string SCRIPT_VERSION = \")[^\"]*\"/\1$next\"/" "$file"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Release Drafter skips this commit when looking for unreleased changes.
+          git commit -am "chore: bump $dir version" -m "Release $TAG"
+          git push origin "HEAD:$BRANCH"
+          echo "$file: $version → $next"
