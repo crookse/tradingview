@@ -1,5 +1,7 @@
 # Session Highs/Lows
 
+See [CHANGELOG.md](CHANGELOG.md) for the version history.
+
 ## Overview
 
 This indicator marks the high and low of each trading session (Asia, London, New York AM and New York PM) and shows when price trades through them. Session highs and lows are common reference levels, and tracking which ones are still untouched is tedious by hand. This indicator draws them automatically and marks each one once price trades beyond it.
