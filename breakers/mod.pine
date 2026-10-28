@@ -6,7 +6,7 @@
 //@version=6
 indicator("Super Crooks - Breakers", overlay = true, max_labels_count = 500, max_lines_count = 500)
 
-const string SCRIPT_VERSION = "v0.0.1"
+const string SCRIPT_VERSION = "0.0.1"
 const int BREAKER_BOX_LENGTH = 15
 
 inputIsBullish(val) =>

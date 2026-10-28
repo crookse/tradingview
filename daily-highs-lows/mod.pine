@@ -10,7 +10,7 @@
 //@version=6
 indicator("Super Crooks - Daily Highs/Lows", overlay=true, max_lines_count=500, max_labels_count=500)
 
-const string SCRIPT_VERSION = "v1.0.1"
+const string SCRIPT_VERSION = "1.0.1"
 
 time_1_hour = 3600000 // 1 hour, in milliseconds
 line_end_time = timenow + time_1_hour
