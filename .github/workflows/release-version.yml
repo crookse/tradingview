@@ -1,9 +1,11 @@
 name: Release Version
 
-# When an indicator's release is published, sets SCRIPT_VERSION in that
-# indicator's mod.pine on main to the release's version (e.g. tag
-# 4h-sweep-close/1.2.0 → SCRIPT_VERSION = "1.2.0") and pushes that as a
-# "chore: bump <indicator> version" commit. Does nothing if main already has it.
+# When an indicator's release is published, updates that indicator on main and
+# pushes the result as a "chore: bump <indicator> version" commit:
+# - sets SCRIPT_VERSION in its mod.pine to the release's version (e.g. tag
+#   4h-sweep-close/1.2.0 → SCRIPT_VERSION = "1.2.0")
+# - adds the release's notes to its CHANGELOG.md as "## [1.2.0] - <date>"
+# Does nothing if main already has both.
 on:
   release:
     types: [published]
@@ -19,17 +21,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
-      - name: Set SCRIPT_VERSION to the tag's version
+      - id: tag
+        name: Read the indicator and version from the tag
         env:
           # From the environment rather than inlined, so a tag name can't run as script.
           TAG: ${{ github.event.release.tag_name }}
-          BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           # <indicator>/<version>, e.g. 4h-sweep-close/1.2.0
           dir=${TAG%/*}
           next=${TAG##*/}
-          file="$dir/mod.pine"
-          if [ "$dir" = "$TAG" ] || [ ! -f "$file" ]; then
+          if [ "$dir" = "$TAG" ] || [ ! -f "$dir/mod.pine" ]; then
             echo "::error::$TAG isn't <indicator>/<version> for an indicator with a mod.pine"
             exit 1
           fi
@@ -37,19 +38,85 @@ jobs:
             echo "::error::$next isn't a version"
             exit 1
           fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+      - name: Set SCRIPT_VERSION to the tag's version
+        env:
+          DIR: ${{ steps.tag.outputs.dir }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          file="$DIR/mod.pine"
           version=$(sed -nE 's/^const string SCRIPT_VERSION = "([^"]+)".*/\1/p' "$file")
           if [ -z "$version" ]; then
             echo "::error file=$file::No SCRIPT_VERSION found"
             exit 1
           fi
-          if [ "$next" = "$version" ]; then
-            echo "$file is already at $next"
+          if [ "$VERSION" = "$version" ]; then
+            echo "$file is already at $VERSION"
+          else
+            sed -i -E "s/^(const string SCRIPT_VERSION = \")[^\"]*\"/\1$VERSION\"/" "$file"
+            echo "$file: $version → $VERSION"
+          fi
+      - name: Add the release's notes to CHANGELOG.md
+        env:
+          DIR: ${{ steps.tag.outputs.dir }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          NOTES: ${{ github.event.release.body }}
+          PUBLISHED_AT: ${{ github.event.release.published_at }}
+        # A hand-written "## [<version>] - Unreleased" entry gets the date and
+        # keeps its text. An entry already dated is left alone. Otherwise the
+        # notes go in a new entry above the newest one.
+        run: |
+          python3 - <<'EOF'
+          import os
+          import re
+
+          d, version = os.environ["DIR"], os.environ["VERSION"]
+          date = os.environ["PUBLISHED_AT"][:10]
+          notes = os.environ.get("NOTES", "").replace("\r\n", "\n").strip()
+          path = f"{d}/CHANGELOG.md"
+
+          if os.path.exists(path):
+              text = open(path).read()
+          else:
+              text = (
+                  "# Changelog\n\n"
+                  "All notable changes to this indicator are documented here. The format is based on "
+                  "[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow "
+                  "[Semantic Versioning](https://semver.org/) and match `SCRIPT_VERSION` in `mod.pine`.\n"
+              )
+
+          heading = f"## [{version}] - {date}"
+          existing = re.search(rf"^## \[{re.escape(version)}\](.*)$", text, re.M)
+          if existing and "unreleased" in existing.group(1).lower():
+              text = text[: existing.start()] + heading + text[existing.end() :]
+              print(f"{path}: dated the {version} entry")
+          elif existing:
+              print(f"{path} already has {version}")
+          else:
+              entry = heading + "\n\n" + (notes + "\n\n" if notes else "")
+              newest = re.search(r"^## \[", text, re.M)
+              if newest:
+                  text = text[: newest.start()] + entry + text[newest.start() :]
+              else:
+                  text = text.rstrip("\n") + "\n\n" + entry
+              print(f"{path}: added {version}")
+
+          open(path, "w").write(text.rstrip("\n") + "\n")
+          EOF
+      - name: Commit and push
+        env:
+          DIR: ${{ steps.tag.outputs.dir }}
+          TAG: ${{ github.event.release.tag_name }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git add "$DIR/mod.pine" "$DIR/CHANGELOG.md"
+          if git diff --cached --quiet; then
+            echo "Nothing to update for $TAG"
             exit 0
           fi
-          sed -i -E "s/^(const string SCRIPT_VERSION = \")[^\"]*\"/\1$next\"/" "$file"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Release Drafter skips this commit when looking for unreleased changes.
-          git commit -am "chore: bump $dir version" -m "Release $TAG"
+          git commit -m "chore: bump $DIR version" -m "Release $TAG"
           git push origin "HEAD:$BRANCH"
-          echo "$file: $version → $next"

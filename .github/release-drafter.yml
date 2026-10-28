@@ -31,7 +31,9 @@ categories:
 change-template: '- $TITLE (#$NUMBER)'
 # Add # and @ to prevent mentions. Add ` to prevent code blocks.
 change-title-escapes: '\<*_&'
+# ### headings, so Release Version can add the notes under a
+# "## [<version>] - <date>" heading in the indicator's CHANGELOG.md.
+category-template: '### $TITLE'
+no-changes-template: '- No changes'
 template: |
-  ## Changes
-
   $CHANGES
