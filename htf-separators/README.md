@@ -1,5 +1,7 @@
 # HTF Separators
 
+See [CHANGELOG.md](CHANGELOG.md) for the version history.
+
 ## Overview
 
 This indicator draws vertical lines that mark where higher-timeframe candles start, so you can see the higher-timeframe structure while on a lower timeframe. It marks each new day on every intraday chart, and adds hourly, 4-hour or 15-minute separators depending on the chart's timeframe.
