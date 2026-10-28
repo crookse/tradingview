@@ -1,8 +1,8 @@
-# Release Drafter v7 (.github/workflows/release-drafter.yml). Pull requests
-# are sorted by their Conventional Commits titles, like "feat: photos".
-# Tags have no "v" in front (e.g. 0.14.0), like package.json's version.
-name-template: '$RESOLVED_VERSION'
-tag-template: '$RESOLVED_VERSION'
+# Release Drafter v7 (.github/workflows/release-drafter.yml). Shared by every
+# indicator: the workflow extends it per indicator with that indicator's tag
+# prefix, tag and name, and keeps only the pull requests that change it.
+# Pull requests are sorted by their Conventional Commits titles, like
+# "feat: photos", which also set the next version.
 categories:
   - title: 'Features'
     semver-increment: 'minor'
@@ -31,7 +31,9 @@ categories:
 change-template: '- $TITLE (#$NUMBER)'
 # Add # and @ to prevent mentions. Add ` to prevent code blocks.
 change-title-escapes: '\<*_&'
+# ### headings, so Release Version can add the notes under a
+# "## [<version>] - <date>" heading in the indicator's CHANGELOG.md.
+category-template: '### $TITLE'
+no-changes-template: '- No changes'
 template: |
-  ## Changes
-
   $CHANGES

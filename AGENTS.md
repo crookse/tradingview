@@ -98,7 +98,19 @@ const string SCRIPT_VERSION = "1.0.0"
 
 1. Create `<indicator-name>/mod.pine` from the template and a `README.md` with Overview, Concepts, How to Use and Features sections.
 2. Add the title to the "Indicators" list in the root `README.md` and to the table above.
-3. When changing an existing script, bump `SCRIPT_VERSION` using semver (patch for fixes, minor for new features or inputs, major for breaking input changes).
+3. Don't bump `SCRIPT_VERSION` by hand; releasing sets it (see "Releases"). Instead, title the pull request so it resolves to the right version: `fix:` for fixes (patch), `feat:` for new features or inputs (minor), `feat!:` for breaking input changes (major).
+
+## Releases
+
+Each indicator is released on its own, tagged `<indicator-name>/<version>` (e.g. `4h-sweep-close/1.2.0`, no `v`).
+
+1. On every push to `main`, `.github/workflows/release-drafter.yml` keeps one draft release per indicator that has changes since its last release. The draft lists only the merged pull requests that changed that directory, and works out the next version from their Conventional Commits titles: `feat!:` → major, `feat:` → minor, anything else → patch. An indicator's first release uses its current `SCRIPT_VERSION`.
+2. Publish a draft on GitHub to release it. `.github/workflows/release-version.yml` then sets `SCRIPT_VERSION` in that indicator's `mod.pine` to the released version, adds the release notes to its `CHANGELOG.md` as `## [<version>] - <date>`, and pushes a `chore: bump <indicator-name> version` commit to `main`.
+
+- Changelogs are written on release, so don't add entries by hand. If you do write one ahead of a release, head it `## [<version>] - Unreleased`; releasing that version fills in the date and keeps your text instead of the generated notes.
+
+- New indicators are picked up automatically (any top-level directory with a `mod.pine`). `SCRIPT_VERSION` must be declared as `const string SCRIPT_VERSION = "x.y.z"` on one line.
+- Shared release-note settings live in `.github/release-drafter.yml`.
 
 ## Verification
 

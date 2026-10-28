@@ -1,7 +1,11 @@
 name: Release Drafter
 
-# Keeps a draft release up to date with the pull requests merged into main
-# since the last release. Publish the draft on GitHub to release it.
+# Keeps one draft release per indicator up to date with the pull requests
+# merged into main that changed it since its last release. An indicator is a
+# top-level directory with a mod.pine. Its draft is tagged <directory>/<version>
+# (e.g. 4h-sweep-close/1.2.0), with the version worked out from the pull
+# request titles. Publish a draft on GitHub to release it; Release Version then
+# writes the version into SCRIPT_VERSION.
 on:
   push:
     branches:
@@ -13,10 +17,78 @@ permissions:
   pull-requests: read
 
 jobs:
-  update_release_draft:
-    runs-on: ubuntu-slim
+  list_indicators:
+    runs-on: ubuntu-latest
+    outputs:
+      dirs: ${{ steps.list.outputs.dirs }}
     steps:
-      - uses: release-drafter/release-drafter@v7
+      - uses: actions/checkout@v7
+      - id: list
+        # Every top-level directory with a mod.pine, as a JSON array.
+        run: |
+          dirs=$(ls -d */mod.pine | cut -d/ -f1 | sed 's/.*/"&"/' | paste -sd, -)
+          echo "dirs=[$dirs]" >> "$GITHUB_OUTPUT"
+
+  update_release_draft:
+    needs: list_indicators
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJSON(needs.list_indicators.outputs.dirs) }}
+    steps:
+      - uses: actions/checkout@v7
         with:
-          # .github/release-drafter.yml
-          config-name: release-drafter.yml
+          # All history and tags, to find the indicator's last release.
+          fetch-depth: 0
+      - id: version
+        name: Check for unreleased changes
+        env:
+          # From the environment rather than inlined, so a directory name can't run as script.
+          DIR: ${{ matrix.dir }}
+        run: |
+          last=$(git tag --list "$DIR/*" --sort=-v:refname | head -n 1)
+          if [ -z "$last" ]; then
+            # Never released: the first release is the current SCRIPT_VERSION,
+            # rather than Release Drafter's default of counting up from 0.0.0.
+            version=$(sed -nE 's/^const string SCRIPT_VERSION = "([^"]+)".*/\1/p' "$DIR/mod.pine")
+            if [ -z "$version" ]; then
+              echo "::error file=$DIR/mod.pine::No SCRIPT_VERSION found"
+              exit 1
+            fi
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          # Changes since the last release, not counting Release Version's own bump.
+          elif git log --format=%h --invert-grep --grep='^chore: bump .* version' "$last..HEAD" -- "$DIR" | grep -q .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No changes to $DIR since $last"
+          fi
+      - name: Generate the indicator's config
+        if: steps.version.outputs.changed == 'true'
+        env:
+          DIR: ${{ matrix.dir }}
+        # Extends .github/release-drafter.yml. tag-prefix keeps this
+        # indicator's draft and last release apart from the others'.
+        run: |
+          cat > .github/release-drafter-indicator.yml <<EOF
+          _extends:
+            from: file:release-drafter.yml
+            strategy:
+              categories: append
+          tag-prefix: '$DIR/'
+          name-template: '$DIR \$RESOLVED_VERSION'
+          tag-template: '$DIR/\$RESOLVED_VERSION'
+          categories:
+            # Only pull requests that change this indicator.
+            - type: 'pre-include'
+              when:
+                paths:
+                  - '$DIR/**'
+          EOF
+      - uses: release-drafter/release-drafter@v7
+        if: steps.version.outputs.changed == 'true'
+        with:
+          config-name: file:release-drafter-indicator.yml
+          # Only set for a first release; otherwise worked out from the pull request titles.
+          version: ${{ steps.version.outputs.version }}
