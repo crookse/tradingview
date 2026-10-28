@@ -1,0 +1,37 @@
+# Release Drafter v7 (.github/workflows/release-drafter.yml). Pull requests
+# are sorted by their Conventional Commits titles, like "feat: photos".
+# Tags have no "v" in front (e.g. 0.14.0), like package.json's version.
+name-template: '$RESOLVED_VERSION'
+tag-template: '$RESOLVED_VERSION'
+categories:
+  - title: 'Features'
+    semver-increment: 'minor'
+    when:
+      conventional:
+        type: 'feat'
+  - title: 'Fixes'
+    when:
+      conventional:
+        type: 'fix'
+  - title: 'Maintenance'
+    when:
+      conventional:
+        types: ['chore', 'ci', 'build', 'refactor', 'docs', 'test', 'perf', 'style']
+  # Anything else, like a title that isn't a conventional commit.
+  - title: 'Other changes'
+  # A breaking change ("feat!: …") makes the next version major.
+  - type: 'version-resolver'
+    semver-increment: 'major'
+    when:
+      conventional:
+        breaking: true
+  # Otherwise a patch, unless a feature made it minor.
+  - type: 'version-resolver'
+    semver-increment: 'patch'
+change-template: '- $TITLE (#$NUMBER)'
+# Add # and @ to prevent mentions. Add ` to prevent code blocks.
+change-title-escapes: '\<*_&'
+template: |
+  ## Changes
+
+  $CHANGES
