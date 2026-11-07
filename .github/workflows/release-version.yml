@@ -2,8 +2,8 @@ name: Release Version
 
 # When an indicator's release is published, updates that indicator on main and
 # pushes the result as a "chore: bump <indicator> version" commit:
-# - sets SCRIPT_VERSION in its mod.pine to the release's version (e.g. tag
-#   4h-sweep-close/1.2.0 → SCRIPT_VERSION = "1.2.0")
+# - sets SCRIPT_VERSION in its mod.pine (and any other .pine there) to the
+#   release's version (e.g. tag 4h-sweep-close/1.2.0 → SCRIPT_VERSION = "1.2.0")
 # - adds the release's notes to its CHANGELOG.md as "## [1.2.0] - <date>"
 # Does nothing if main already has both.
 on:
@@ -44,19 +44,22 @@ jobs:
         env:
           DIR: ${{ steps.tag.outputs.dir }}
           VERSION: ${{ steps.tag.outputs.version }}
+        # Every script in the indicator's directory (mod.pine, plus e.g. a
+        # strategy.pine), so they share the release's version.
         run: |
-          file="$DIR/mod.pine"
-          version=$(sed -nE 's/^const string SCRIPT_VERSION = "([^"]+)".*/\1/p' "$file")
-          if [ -z "$version" ]; then
-            echo "::error file=$file::No SCRIPT_VERSION found"
-            exit 1
-          fi
-          if [ "$VERSION" = "$version" ]; then
-            echo "$file is already at $VERSION"
-          else
-            sed -i -E "s/^(const string SCRIPT_VERSION = \")[^\"]*\"/\1$VERSION\"/" "$file"
-            echo "$file: $version → $VERSION"
-          fi
+          for file in "$DIR"/*.pine; do
+            version=$(sed -nE 's/^const string SCRIPT_VERSION = "([^"]+)".*/\1/p' "$file")
+            if [ -z "$version" ]; then
+              echo "::error file=$file::No SCRIPT_VERSION found"
+              exit 1
+            fi
+            if [ "$VERSION" = "$version" ]; then
+              echo "$file is already at $VERSION"
+            else
+              sed -i -E "s/^(const string SCRIPT_VERSION = \")[^\"]*\"/\1$VERSION\"/" "$file"
+              echo "$file: $version → $VERSION"
+            fi
+          done
       - name: Add the release's notes to CHANGELOG.md
         env:
           DIR: ${{ steps.tag.outputs.dir }}
@@ -110,7 +113,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
           BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          git add "$DIR/mod.pine" "$DIR/CHANGELOG.md"
+          git add "$DIR"/*.pine "$DIR/CHANGELOG.md"
           if git diff --cached --quiet; then
             echo "Nothing to update for $TAG"
             exit 0
