@@ -14,6 +14,7 @@ Current indicators:
 | `breakers/` | Super Crooks - Breakers |
 | `daily-highs-lows/` | Super Crooks - Daily Highs/Lows |
 | `htf-separators/` | Super Crooks - HTF Separators |
+| `order-blocks/` | Super Crooks - Order Blocks |
 | `session-highs-lows/` | Super Crooks - Session Highs/Lows |
 
 ## Pine Script version

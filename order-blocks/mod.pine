@@ -1,0 +1,303 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © crookse
+// GitHub: https://github.com/crookse
+// Website: https://supercrookstradingbros.com
+
+//@version=6
+indicator("Super Crooks - Order Blocks", overlay = true, max_labels_count = 500, max_lines_count = 500)
+
+const string SCRIPT_VERSION = "1.0.0"
+
+const int STAGE_VALID = 0
+const int STAGE_BROKEN = 1
+const int STAGE_RECLAIMED = 2
+const int STAGE_DONE = 3
+
+////////////////////////////////////////////////////////////////////////////////
+// INPUTS
+////////////////////////////////////////////////////////////////////////////////
+
+input_show_setups = input.string("Both", "Show Setups", options = ["Both", "Bullish", "Bearish", "None"], group = "Global Settings")
+input_tolerance = input.float(0.5, "PDH/PDL Proximity (x ATR)", minval = 0, step = 0.1, tooltip = "How close the order block candle must be to the PDH/PDL it breaks, as a multiple of the 1h ATR(14). 0 means the candle's range must touch the level.", group = "Global Settings")
+input_history = input.int(10, "Order Block History", minval = 1, maxval = 200, tooltip = "How many order block lines of each type (bullish and bearish) stay on the chart. Older lines are removed.", group = "Global Settings")
+input_line_width = input.int(2, "Line Width", minval = 1, maxval = 5, group = "Global Settings")
+
+input_show_engulfing = input.bool(true, "Show Engulfing Order Blocks", tooltip = "After a 1h OB+ is respected (retested and held), each bullish engulfing 1h candle also marks a 1h OB+, until a 1h candle closes below the respected line. Bearish is mirrored for 1h OB-.", group = "Engulfing Continuation")
+input_engulf_bars = input.int(3, "Engulfing Within (1h candles)", minval = 1, maxval = 20, tooltip = "How many 1h candles after the down-close (up-close for bearish) candle the engulfing candle can close. Bullish engulfing: an up-close candle that closes above the down-close candle's high. Bearish engulfing: a down-close candle that closes below the up-close candle's low.", group = "Engulfing Continuation")
+
+input_bull_color = input.color(color.new(#4caf50, 0), "Bullish Line Color", group = "Colors")
+input_bear_color = input.color(color.new(#f23645, 0), "Bearish Line Color", group = "Colors")
+
+////////////////////////////////////////////////////////////////////////////////
+// HELPERS
+////////////////////////////////////////////////////////////////////////////////
+
+// All detection runs on 1h candles. On lower timeframes the 1h candles are built
+// from the chart's bars, and drawings use bar time so they line up on any chart.
+type OrderBlock
+    float level
+    int stage
+    int formed_index // 1h candle counter, not bar_index
+    line level_line
+    label tag
+
+showBullish(string setups) =>
+    setups == "Both" or setups == "Bullish"
+
+showBearish(string setups) =>
+    setups == "Both" or setups == "Bearish"
+
+// True if the candle's range (low to high) is within `tolerance` of `level`.
+isAround(float candle_low, float candle_high, float level, float tolerance) =>
+    candle_low <= level + tolerance and candle_high >= level - tolerance
+
+// Adds a new order block and removes the oldest one (and its drawings) once the
+// history count is exceeded.
+pushOrderBlock(array<OrderBlock> blocks, float level, int start_time, int candle_index, color line_color, string tag_text, int history) =>
+    line level_line = line.new(start_time, level, time, level, xloc = xloc.bar_time, color = line_color, width = input_line_width)
+    label tag = label.new(time, level, tag_text, xloc = xloc.bar_time, color = color.new(color.black, 100), textcolor = line_color, style = label.style_label_left, size = size.small)
+    blocks.push(OrderBlock.new(level, STAGE_VALID, candle_index, level_line, tag))
+    if blocks.size() > history
+        OrderBlock oldest = blocks.shift()
+        line.delete(oldest.level_line)
+        label.delete(oldest.tag)
+
+// Bullish lifecycle on a closed 1h candle: valid -> (close below) broken ->
+// (close above) reclaimed. While valid or reclaimed, the first candle that trades
+// down into the level and closes at or above it is the entry, and the line (and
+// its tag) stops there. Returns the level of a block respected on this candle, or na.
+updateBullish(array<OrderBlock> blocks, int candle_index, float candle_low, float candle_close) =>
+    float respected = na
+    for block in blocks
+        if block.stage != STAGE_DONE and candle_index > block.formed_index
+            if block.stage == STAGE_BROKEN
+                if candle_close > block.level
+                    block.stage := STAGE_RECLAIMED
+            else if candle_low <= block.level
+                if candle_close >= block.level
+                    block.stage := STAGE_DONE
+                    respected := block.level
+                    block.level_line.set_x2(time)
+                    block.tag.set_x(time)
+                else
+                    block.stage := STAGE_BROKEN
+    respected
+
+// Bearish mirror of updateBullish.
+updateBearish(array<OrderBlock> blocks, int candle_index, float candle_high, float candle_close) =>
+    float respected = na
+    for block in blocks
+        if block.stage != STAGE_DONE and candle_index > block.formed_index
+            if block.stage == STAGE_BROKEN
+                if candle_close < block.level
+                    block.stage := STAGE_RECLAIMED
+            else if candle_high >= block.level
+                if candle_close <= block.level
+                    block.stage := STAGE_DONE
+                    respected := block.level
+                    block.level_line.set_x2(time)
+                    block.tag.set_x(time)
+                else
+                    block.stage := STAGE_BROKEN
+    respected
+
+// Extends every active line (and its tag) to the current chart bar.
+extendActive(array<OrderBlock> blocks) =>
+    for block in blocks
+        if block.stage != STAGE_DONE
+            block.level_line.set_x2(time)
+            block.tag.set_x(time)
+
+////////////////////////////////////////////////////////////////////////////////
+// STATE
+////////////////////////////////////////////////////////////////////////////////
+
+// Works on the 1h chart and on lower timeframes that divide an hour evenly (e.g. 5m).
+int chart_seconds = timeframe.in_seconds()
+bool is_supported_tf = chart_seconds > 0 and chart_seconds <= 3600 and 3600 % chart_seconds == 0
+
+// Current 1h candle, built from the chart's bars. On the 1h chart each bar is one candle.
+var float h_open = na
+var float h_high = na
+var float h_low = na
+var int h_time = na
+
+if timeframe.change("60") or na(h_open)
+    h_open := open
+    h_high := high
+    h_low := low
+    h_time := time
+else
+    h_high := math.max(h_high, high)
+    h_low := math.min(h_low, low)
+
+// The chart bar that closes the 1h candle.
+bool is_hour_close = is_supported_tf and barstate.isconfirmed and time_close == time_close("60")
+
+var int h_index = 0
+var float h_prev_close = na
+var float h_atr = na
+
+// Previous day high/low. Days follow the symbol's trading session, matching
+// Super Crooks - Daily Highs/Lows.
+var float day_high = na
+var float day_low = na
+var float pdh = na
+var float pdl = na
+
+// One bullish and one bearish order block per level per day.
+var bool pdh_bull_used = false
+var bool pdl_bull_used = false
+var bool pdh_bear_used = false
+var bool pdl_bear_used = false
+
+if session.isfirstbar
+    pdh := day_high
+    pdl := day_low
+    day_high := high
+    day_low := low
+    pdh_bull_used := false
+    pdl_bull_used := false
+    pdh_bear_used := false
+    pdl_bear_used := false
+else
+    day_high := na(day_high) ? high : math.max(day_high, high)
+    day_low := na(day_low) ? low : math.min(day_low, low)
+
+// Bullish state. Indexes are 1h candle counters; times are 1h candle open times.
+var array<OrderBlock> bull_blocks = array.new<OrderBlock>()
+var int bull_down_index = na
+var float bull_down_low = na
+var float bull_down_high = na
+var int bull_last_ob_index = na
+// Lowest 1h candle after the order block candle (up to and including the current one).
+var float bull_after_low = na
+var int bull_after_time = na
+// Engulfing continuation window: open while price holds above the last respected OB+.
+var float bull_respected_level = na
+var int bull_respected_index = na
+
+// Bearish state.
+var array<OrderBlock> bear_blocks = array.new<OrderBlock>()
+var int bear_up_index = na
+var int bear_up_time = na
+var float bear_up_low = na
+var float bear_up_high = na
+var int bear_last_ob_index = na
+// Highest 1h candle after the order block candle (up to and including the current one).
+var float bear_after_high = na
+var int bear_after_time = na
+// Engulfing continuation window: open while price holds below the last respected OB-.
+var float bear_respected_level = na
+var int bear_respected_index = na
+
+////////////////////////////////////////////////////////////////////////////////
+// LOGIC + DRAWING
+////////////////////////////////////////////////////////////////////////////////
+
+if is_hour_close
+    h_index += 1
+    float true_range = na(h_prev_close) ? h_high - h_low : math.max(h_high - h_low, math.abs(h_high - h_prev_close), math.abs(h_low - h_prev_close))
+    h_atr := na(h_atr) ? true_range : (h_atr * 13 + true_range) / 14
+    float tolerance = h_atr * input_tolerance
+
+    // Bullish: a 1h close above the PDH or PDL. The order block is the last
+    // down-close 1h candle before that close, if it sits around the broken level.
+    // The line is drawn at the lowest low after the order block candle.
+    if showBullish(input_show_setups)
+        float bull_respected = updateBullish(bull_blocks, h_index, h_low, close)
+        if not na(bull_respected)
+            bull_respected_level := bull_respected
+            bull_respected_index := h_index
+        else if not na(bull_respected_level) and close < bull_respected_level
+            bull_respected_level := na
+            bull_respected_index := na
+
+        if not na(bull_down_index) and (na(bull_after_low) or h_low < bull_after_low)
+            bull_after_low := h_low
+            bull_after_time := h_time
+
+        bool breaks_pdh_up = not pdh_bull_used and not na(pdh) and not na(h_prev_close) and close > pdh and h_prev_close <= pdh
+        bool breaks_pdl_up = not pdl_bull_used and not na(pdl) and not na(h_prev_close) and close > pdl and h_prev_close <= pdl
+        bool has_candidate = not na(bull_down_index) and (na(bull_last_ob_index) or bull_down_index != bull_last_ob_index)
+
+        if has_candidate and (breaks_pdh_up or breaks_pdl_up)
+            bool near_pdh = breaks_pdh_up and isAround(bull_down_low, bull_down_high, pdh, tolerance)
+            bool near_pdl = breaks_pdl_up and isAround(bull_down_low, bull_down_high, pdl, tolerance)
+            if near_pdh or near_pdl
+                bull_last_ob_index := bull_down_index
+                pdh_bull_used := pdh_bull_used or near_pdh
+                pdl_bull_used := pdl_bull_used or near_pdl
+                pushOrderBlock(bull_blocks, bull_after_low, bull_after_time, h_index, input_bull_color, "1h OB+", input_history)
+
+        // Continuation: a bullish engulfing 1h candle after a respected OB+. The
+        // order block is the down-close candle it engulfs (closes above its high).
+        bool bull_engulf_ok = input_show_engulfing and not na(bull_respected_level) and not na(bull_down_index)
+        if bull_engulf_ok and bull_down_index >= bull_respected_index and (na(bull_last_ob_index) or bull_down_index != bull_last_ob_index)
+            if close > h_open and close > bull_down_high and h_index - bull_down_index <= input_engulf_bars
+                bull_last_ob_index := bull_down_index
+                pushOrderBlock(bull_blocks, bull_after_low, bull_after_time, h_index, input_bull_color, "1h OB+", input_history)
+
+        if close < h_open
+            bull_down_index := h_index
+            bull_down_low := h_low
+            bull_down_high := h_high
+            bull_after_low := na
+            bull_after_time := na
+
+    // Bearish: a 1h close below the PDH or PDL. The order block is the last
+    // up-close 1h candle before that close, if it sits around the broken level.
+    if showBearish(input_show_setups)
+        float bear_respected = updateBearish(bear_blocks, h_index, h_high, close)
+        if not na(bear_respected)
+            bear_respected_level := bear_respected
+            bear_respected_index := h_index
+        else if not na(bear_respected_level) and close > bear_respected_level
+            bear_respected_level := na
+            bear_respected_index := na
+
+        if not na(bear_up_index) and (na(bear_after_high) or h_high > bear_after_high)
+            bear_after_high := h_high
+            bear_after_time := h_time
+
+        bool breaks_pdh_down = not pdh_bear_used and not na(pdh) and not na(h_prev_close) and close < pdh and h_prev_close >= pdh
+        bool breaks_pdl_down = not pdl_bear_used and not na(pdl) and not na(h_prev_close) and close < pdl and h_prev_close >= pdl
+        bool has_candidate = not na(bear_up_index) and (na(bear_last_ob_index) or bear_up_index != bear_last_ob_index)
+
+        if has_candidate and (breaks_pdh_down or breaks_pdl_down)
+            bool near_pdh = breaks_pdh_down and isAround(bear_up_low, bear_up_high, pdh, tolerance)
+            bool near_pdl = breaks_pdl_down and isAround(bear_up_low, bear_up_high, pdl, tolerance)
+            if near_pdh or near_pdl
+                bear_last_ob_index := bear_up_index
+                pdh_bear_used := pdh_bear_used or near_pdh
+                pdl_bear_used := pdl_bear_used or near_pdl
+                pushOrderBlock(bear_blocks, bear_up_high, bear_up_time, h_index, input_bear_color, "1h OB-", input_history)
+
+        // Continuation: a bearish engulfing 1h candle after a respected OB-. The
+        // order block is the up-close candle it engulfs (closes below its low). The
+        // line is drawn at the highest high after that candle.
+        bool bear_engulf_ok = input_show_engulfing and not na(bear_respected_level) and not na(bear_up_index)
+        if bear_engulf_ok and bear_up_index >= bear_respected_index and (na(bear_last_ob_index) or bear_up_index != bear_last_ob_index)
+            if close < h_open and close < bear_up_low and h_index - bear_up_index <= input_engulf_bars
+                bear_last_ob_index := bear_up_index
+                pushOrderBlock(bear_blocks, bear_after_high, bear_after_time, h_index, input_bear_color, "1h OB-", input_history)
+
+        if close > h_open
+            bear_up_index := h_index
+            bear_up_time := h_time
+            bear_up_low := h_low
+            bear_up_high := h_high
+            bear_after_high := na
+            bear_after_time := na
+
+    h_prev_close := close
+
+// Keep active lines running to the latest chart bar (every 5m bar on a 5m chart).
+if is_supported_tf
+    extendActive(bull_blocks)
+    extendActive(bear_blocks)
+
+var table tf_notice = table.new(position.top_right, 1, 1)
+
+if barstate.islast and not is_supported_tf
+    table.cell(tf_notice, 0, 0, "Order Blocks: use 1h or a lower timeframe that divides an hour (e.g. 5m)", text_color = color.white, bgcolor = color.new(color.gray, 20), text_size = size.small)

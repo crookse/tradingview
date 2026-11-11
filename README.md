@@ -14,6 +14,7 @@ All indicators use the prefix "Super Crooks" in their titles to ensure consisten
 - Super Crooks - Daily Highs/Lows
 - Super Crooks - HTF Separators
 - Super Crooks - 4H Sweep/Close
+- Super Crooks - Order Blocks
 
 ## TradingView Hosting Notice
 
