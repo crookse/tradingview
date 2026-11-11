@@ -31,7 +31,7 @@ This indicator marks order blocks that form around the previous day's high (PDH)
 
 ## Features
 
-- Bullish (green) and bearish (red) order blocks at PDH/PDL breaks, drawn after the 1h candle closes (no repainting), on 1h or lower timeframes
+- Bullish (blue) and bearish (red) order blocks at PDH/PDL breaks, drawn after the 1h candle closes (no repainting), on 1h or lower timeframes
 - Engulfing continuation order blocks after a respected 1h OB+ / OB-
 - Lines survive a break and end on the first retest after a reclaim
 - "1h OB+" / "1h OB-" text on the right end of each line

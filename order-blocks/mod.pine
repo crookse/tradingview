@@ -25,7 +25,7 @@ input_line_width = input.int(2, "Line Width", minval = 1, maxval = 5, group = "G
 input_show_engulfing = input.bool(true, "Show Engulfing Order Blocks", tooltip = "After a 1h OB+ is respected (retested and held), each bullish engulfing 1h candle also marks a 1h OB+, until a 1h candle closes below the respected line. Bearish is mirrored for 1h OB-.", group = "Engulfing Continuation")
 input_engulf_bars = input.int(3, "Engulfing Within (1h candles)", minval = 1, maxval = 20, tooltip = "How many 1h candles after the down-close (up-close for bearish) candle the engulfing candle can close. Bullish engulfing: an up-close candle that closes above the down-close candle's high. Bearish engulfing: a down-close candle that closes below the up-close candle's low.", group = "Engulfing Continuation")
 
-input_bull_color = input.color(color.new(#4caf50, 0), "Bullish Line Color", group = "Colors")
+input_bull_color = input.color(color.new(#2962ff, 0), "Bullish Line Color", group = "Colors")
 input_bear_color = input.color(color.new(#f23645, 0), "Bearish Line Color", group = "Colors")
 
 ////////////////////////////////////////////////////////////////////////////////
