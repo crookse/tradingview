@@ -20,11 +20,15 @@ var gmt_tz = "GMT+0"
 time_current_hour = hour(time)
 time_current_minute = minute(time)
 time_is_4m_or_below = timeframe.in_seconds() <= 4 * 60
+// Separators are only drawn on intraday charts (below 1D)
+is_daily_or_above = timeframe.in_seconds() >= 24 * 60 * 60
 
 var current_timeframe = "NA"
 
 if timeframe.period == "1"
     current_timeframe := "1m"
+if timeframe.period == "3"
+    current_timeframe := "3m"
 if timeframe.period == "5"
     current_timeframe := "5m"
 if timeframe.period == "15"
@@ -52,14 +56,14 @@ time_ny = timestamp("America/New_York", year, month, dayofmonth, 18, 0, 0)
 // We don't use offset because if we're in a lower timeframe and zoomed out, the
 // day label moves towards the daily line. We want the day label to stay away
 // from it no matter the timeframe/zoom.
-plotshape(dayofweek(time, "GMT-4") == 1 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       M\n       O\n       N", size = size.tiny)
-plotshape(dayofweek(time, "GMT-4") == 2 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       T\n       U\n       E", size = size.tiny)
-plotshape(dayofweek(time, "GMT-4") == 3 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       W\n       E\n       D", size = size.tiny)
-plotshape(dayofweek(time, "GMT-4") == 4 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       T\n       H\n       U", size = size.tiny)
-plotshape(dayofweek(time, "GMT-4") == 5 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       F\n       R\n       I", size = size.tiny)
-plotshape(dayofweek(time, "GMT-4") == 6 and is_new_day and input_show_daily_lines == "Lines and Labels" and (current_timeframe != "1D"), location = location.bottom, color = na, textcolor = color.black, text = "       S\n       U\n       N", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 1 and is_new_day and input_show_daily_lines == "Lines and Labels" and not is_daily_or_above, location = location.bottom, color = na, textcolor = color.black, text = "       M\n       O\n       N", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 2 and is_new_day and input_show_daily_lines == "Lines and Labels" and not is_daily_or_above, location = location.bottom, color = na, textcolor = color.black, text = "       T\n       U\n       E", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 3 and is_new_day and input_show_daily_lines == "Lines and Labels" and not is_daily_or_above, location = location.bottom, color = na, textcolor = color.black, text = "       W\n       E\n       D", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 4 and is_new_day and input_show_daily_lines == "Lines and Labels" and not is_daily_or_above, location = location.bottom, color = na, textcolor = color.black, text = "       T\n       H\n       U", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 5 and is_new_day and input_show_daily_lines == "Lines and Labels" and not is_daily_or_above, location = location.bottom, color = na, textcolor = color.black, text = "       F\n       R\n       I", size = size.tiny)
+plotshape(dayofweek(time, "GMT-4") == 6 and is_new_day and input_show_daily_lines == "Lines and Labels" and not is_daily_or_above, location = location.bottom, color = na, textcolor = color.black, text = "       S\n       U\n       N", size = size.tiny)
 
-if is_new_day and (input_show_daily_lines == "Lines" or input_show_daily_lines == "Lines and Labels") and current_timeframe != "1D"
+if is_new_day and (input_show_daily_lines == "Lines" or input_show_daily_lines == "Lines and Labels") and not is_daily_or_above
     // If we're in minutes, then use thicker DAILY session lines
     line.new(
         x1=bar_index,
@@ -84,6 +88,19 @@ if (current_timeframe == "5m") and (minute(time) == 0)
       width = 1,
       style = line.style_dotted
       )
+
+// If time is 3m, then mark every 30m candle
+if current_timeframe == "3m" and minute(time) % 30 == 0
+    line.new(
+        x1=bar_index,
+        y1=low,
+        x2=bar_index,
+        y2=high,
+        extend = extend.both,
+        color = color.new(color.black, 50),
+        width = 1,
+        style = line.style_dotted
+    )
 
 // If time is at 15m, then we need to mark every 4th hour
 if current_timeframe == "15m"
