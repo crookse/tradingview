@@ -35,12 +35,14 @@ If unsure whether a built-in exists or how it behaves in v6, check the Pine Scri
 
 ```
 <indicator-name>/      # kebab-case
-├── mod.pine           # the entire script
-└── README.md          # Overview, Concepts, How to Use, Features
+├── mod.pine           # the entire indicator script
+├── strategy.pine      # optional: a strategy that trades the indicator's signals
+├── README.md          # Overview, Concepts, How to Use, Features
+└── CHANGELOG.md       # written on release (see "Releases")
 ```
 
-- Each `mod.pine` must be self-contained and paste-able into the Pine Editor. Don't share code between directories (no imported libraries unless the user asks for one).
-- One indicator per directory; don't put multiple scripts in one directory.
+- Each `.pine` file must be self-contained and paste-able into the Pine Editor. Don't share code between files or directories (no imported libraries unless the user asks for one), so a `strategy.pine` repeats the signal logic it needs from `mod.pine`. Keep the two in sync when that logic changes.
+- One indicator per directory. The only other script allowed in it is that indicator's `strategy.pine`, which is released with the indicator and shares its `SCRIPT_VERSION`.
 
 ## Script template
 

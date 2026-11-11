@@ -4,7 +4,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## Overview
 
-This indicator draws vertical lines that mark where higher-timeframe candles start, so you can see the higher-timeframe structure while on a lower timeframe. It marks each new day on every intraday chart, and adds hourly, 4-hour or 15-minute separators depending on the chart's timeframe.
+This indicator draws vertical lines that mark where higher-timeframe candles start, so you can see the higher-timeframe structure while on a lower timeframe. It marks each new day on every intraday chart (nothing is drawn on the 1D chart or higher), and adds hourly, 4-hour, 30-minute or 15-minute separators depending on the chart's timeframe.
 
 ## Concepts
 
@@ -14,6 +14,7 @@ This indicator draws vertical lines that mark where higher-timeframe candles sta
   | Chart | Separators |
   | --- | --- |
   | 1m | 4H candles (solid) and 15m candles (dotted) |
+  | 3m | 30m candles (dotted) |
   | 5m | 1H candles (dotted) |
   | 15m | 4H candles (dotted) |
 
@@ -26,11 +27,12 @@ This indicator draws vertical lines that mark where higher-timeframe candles sta
    - **Lines and Labels:** daily lines with day-of-week labels
    - **Lines:** daily lines only
    - **None:** no daily lines
-3. Switch between the 1m, 5m and 15m charts to see the matching higher-timeframe separators.
+3. Switch between the 1m, 3m, 5m and 15m charts to see the matching higher-timeframe separators.
 
 ## Features
 
 - Daily separators with day-of-week labels on all intraday charts
 - 1H separators on the 5m chart
 - 4H separators on the 15m and 1m charts
+- 30m separators on the 3m chart
 - 15m separators on the 1m chart
